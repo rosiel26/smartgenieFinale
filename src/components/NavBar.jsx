@@ -30,7 +30,7 @@ const Navbar = () => {
   }
 
   return (
-    <nav className="bg-black shadow-md px-6 py-4 flex justify-between items-center fixed w-full z-50">
+    <nav className="shadow-md px-6 py-4 flex justify-between items-center fixed w-full z-50">
       {/* Logo */}
       <div
         className="text-2xl font-bold text-white cursor-pointer"
@@ -45,13 +45,13 @@ const Navbar = () => {
           <>
             <button
               onClick={() => navigate("/login")}
-              className="px-4 py-2 bg-lime-500 text-black rounded hover:bg-lime-700 transition hover:text-white border-2 border-lime-500"
+              className="px-4 py-2 font-bold bg-black text-white rounded hover:bg-lime-700 transition hover:text-white border-2"
             >
               Login
             </button>
             <button
               onClick={() => navigate("/signup")}
-              className="px-4 py-2 border-2 border-lime-500 text-white rounded hover:bg-white hover:text-black transition "
+              className="px-4 py-2 border-2 text-black rounded hover:bg-white hover:text-black hover:font-bold transition "
             >
               Sign Up
             </button>
