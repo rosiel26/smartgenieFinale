@@ -677,7 +677,7 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
         carbs: Math.round(totalCarbs * portionMultiplier),
       };
 
-      console.log("New meal entry:", newEntry);
+      // console.log("New meal entry:", newEntry);
 
       const { error } = await supabase.from("meal_logs").insert([newEntry]);
       if (error) {
