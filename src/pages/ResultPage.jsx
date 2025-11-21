@@ -109,7 +109,7 @@ export default function ResultPage() {
     }
 
     // Defensive check for dish.id to prevent mobile-specific null value errors
-    if (!dish.id || isNaN(parseInt(dish.id, 10))) {
+    if (dish.id == null || isNaN(parseInt(dish.id, 10))) {
       setAlertMessage("Failed to add meal: Dish ID is missing or invalid.");
       setShowAlertModal(true);
       console.error("Attempted to add meal with invalid dish.id:", dish.id);
