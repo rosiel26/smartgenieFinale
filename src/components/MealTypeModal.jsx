@@ -28,7 +28,7 @@ const MealTypeModal = ({ isOpen, onClose, onSelectMealType }) => {
               <button
                 key={type}
                 onClick={() => onSelectMealType(type)}
-                className="w-full bg-green-500 text-white py-3 rounded-xl hover:bg-green-600 transition-colors"
+                className="w-full bg-black text-white py-3 rounded-xl hover:bg-lime-600 transition-colors"
               >
                 {type}
               </button>
@@ -36,7 +36,7 @@ const MealTypeModal = ({ isOpen, onClose, onSelectMealType }) => {
           </div>
           <button
             onClick={onClose}
-            className="w-full mt-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-xl"
+            className="w-full mt-4 py-2 text-sm text-gray-600 hover:bg-red-800 hover:text-white rounded-xl"
           >
             Cancel
           </button>
