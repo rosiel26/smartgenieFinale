@@ -1,7 +1,15 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
-import { FiArrowLeft, FiTrash2, FiDatabase, FiX, FiKey } from "react-icons/fi";
+import {
+  FiArrowLeft,
+  FiTrash2,
+  FiDatabase,
+  FiX,
+  FiKey,
+  FiEye,
+  FiEyeOff,
+} from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
 
 export default function AccountManagement() {
@@ -18,6 +26,7 @@ export default function AccountManagement() {
 
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [user, setUser] = useState(null);
 
@@ -255,20 +264,38 @@ export default function AccountManagement() {
               <h3 className="text-lg font-semibold text-gray-800">
                 Change Password
               </h3>
-              <input
-                type="password"
-                placeholder="New Password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full border border-gray-300 p-2 rounded-lg"
-              />
-              <input
-                type="password"
-                placeholder="Confirm Password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full border border-gray-300 p-2 rounded-lg"
-              />
+              <div className="relative flex items-center">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="New Password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full border border-gray-300 p-2 rounded-lg pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 text-gray-500"
+                >
+                  {showPassword ? <FiEye /> : <FiEyeOff />}
+                </button>
+              </div>
+              <div className="relative flex items-center">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Confirm Password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full border border-gray-300 p-2 rounded-lg pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 text-gray-500"
+                >
+                  {showPassword ? <FiEye /> : <FiEyeOff />}
+                </button>
+              </div>
               <div className="flex justify-center gap-3 mt-4">
                 <button
                   onClick={() => {
