@@ -108,6 +108,14 @@ export default function ResultPage() {
       return;
     }
 
+    // Defensive check for dish.id to prevent mobile-specific null value errors
+    if (!dish.id || isNaN(parseInt(dish.id, 10))) {
+      setAlertMessage("Failed to add meal: Dish ID is missing or invalid.");
+      setShowAlertModal(true);
+      console.error("Attempted to add meal with invalid dish.id:", dish.id);
+      return;
+    }
+
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -134,10 +142,14 @@ export default function ResultPage() {
 
     if (error) {
       setAlertMessage(`Failed to add meal: ${error.message}`);
+      setShowAlertModal(true);
     } else {
       setAlertMessage(`${dish.name} added to ${mealType}!`);
+      setShowAlertModal(true);
+      setTimeout(() => {
+        setShowAlertModal(false);
+      }, 1000); // Auto-close success modal after 1 second
     }
-    setShowAlertModal(true);
   };
 
   const handleSubmitFeedback = async () => {
