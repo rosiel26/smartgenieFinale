@@ -222,9 +222,14 @@ export default function Workout() {
   const profile = useUserProfile(userId);
   const { workoutTypes, fetchWorkouts } = useWorkouts(userId, profile);
 
+  const exploreWorkouts = useMemo(
+    () => shuffleArray(workoutTypes),
+    [workoutTypes]
+  );
+
   const recommended = useMemo(() => {
     if (!workoutTypes.length) return [];
-    if (!profile?.goal) return shuffleArray(workoutTypes);
+    if (!profile?.goal) return exploreWorkouts;
 
     const goalLower = profile.goal?.toLowerCase().trim();
     const userHealthConditionsLower = (profile.health_conditions || []).map(
@@ -244,8 +249,8 @@ export default function Workout() {
       return suitableForGoal && safeForHealth;
     });
 
-    return matched.length > 0 ? matched : shuffleArray(workoutTypes);
-  }, [profile, workoutTypes]);
+    return matched.length > 0 ? matched : exploreWorkouts;
+  }, [profile, workoutTypes, exploreWorkouts]);
 
   const filteredWorkouts = useMemo(() => {
     if (!searchQuery) return workoutTypes;
@@ -325,11 +330,6 @@ export default function Workout() {
     }
   };
 
-  const exploreWorkouts = useMemo(
-    () => shuffleArray(workoutTypes),
-    [workoutTypes]
-  );
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-green-100 flex justify-center items-center p-4">
       <div className="bg-white w-[375px] h-[700px] rounded-3xl shadow-2xl overflow-hidden flex flex-col ">
@@ -348,13 +348,7 @@ export default function Workout() {
         </div>
 
         <div className=" p-4 flex-1 space-y-2 overflow-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleAddWorkout(selectedWorkout, undefined);
-            }}
-            className="space-y-5 relative  p-5 rounded-2xl "
-          >
+          <div className="space-y-5 relative  p-5 rounded-2xl ">
             <div className="relative" ref={dropdownRef}>
               <label className="block mb-1 text-sm font-medium text-black">
                 Workout
@@ -398,8 +392,7 @@ export default function Workout() {
                               );
                               setShowDropdown(false);
                             } else {
-                              setSelectedWorkout(w.id);
-                              setSearchQuery(w.name);
+                              setModalWorkout(w);
                               setShowDropdown(false);
                             }
                           }}
@@ -435,7 +428,7 @@ export default function Workout() {
                 </div>
               )}
             </div>
-          </form>
+          </div>
 
           {/* Recommended Workouts */}
           <div className="space-y-3 relative p-5">
