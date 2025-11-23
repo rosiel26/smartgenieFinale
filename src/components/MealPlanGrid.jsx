@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 
 export default function MealPlanGrid({ weeklyPlan, mealTypes, onOpenDish }) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
   const [filterDays, setFilterDays] = useState("3");
   const [mealStatusFilter, setMealStatusFilter] = useState("all");
 
@@ -98,34 +100,63 @@ export default function MealPlanGrid({ weeklyPlan, mealTypes, onOpenDish }) {
                   const { calories, protein, carbs, fats } =
                     computeMacros(meal);
 
-                  // ✅ Only "added" meals are unclickable
+                  // --- Status Logic ---
+                  const mealDate = new Date(day.date);
+                  mealDate.setHours(0, 0, 0, 0);
+
+                  const isActive =
+                    mealDate.getTime() === today.getTime() &&
+                    meal.status === "pending";
                   const isClickable = meal.status !== "added";
 
                   let statusStyles = "";
+                  let statusOverlay = null;
+
                   if (meal.status === "added") {
                     statusStyles =
-                      "bg-green-50 border-green-200 opacity-60 cursor-not-allowed";
+                      "bg-green-100 border-green-300 opacity-70 cursor-not-allowed";
+                    statusOverlay = (
+                      <div className="absolute top-1 right-1 bg-green-500 text-white rounded-full h-4 w-4 flex items-center justify-center">
+                        <svg
+                          className="w-3 h-3"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                          xmlns="http://www.w3.org/2000/svg"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="3"
+                            d="M5 13l4 4L19 7"
+                          ></path>
+                        </svg>
+                      </div>
+                    );
                   } else if (meal.status === "missed") {
-                    // Missed meals are clickable
+                    statusStyles = "bg-red-100 border-red-300 hover:bg-red-200";
+                    statusOverlay = (
+                      <div className="absolute inset-0 flex items-center justify-center bg-red-500 bg-opacity-20">
+                        <span className="text-red-700 font-bold text-xs uppercase tracking-wider">
+                          Missed
+                        </span>
+                      </div>
+                    );
+                  } else if (isActive) {
                     statusStyles =
-                      "bg-red-50 border-red-200 cursor-pointer hover:bg-red-100";
+                      " border-2 cursor-pointer hover:bg-yellow-50";
                   } else {
-                    statusStyles = "cursor-pointer hover:bg-green-50";
+                    // Pending (future meals)
+                    statusStyles = "opacity-80 cursor-pointer hover:bg-gray-50";
                   }
 
                   return (
                     <td
                       key={idx}
-                      className={`border px-2 py-1 relative ${statusStyles}`}
+                      className={`border px-2 py-1 relative transition-all duration-200 ${statusStyles}`}
                       onClick={() => isClickable && onOpenDish(meal, day.date)}
                     >
-                      {meal.status === "missed" && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-10">
-                          <span className="text-red-500 font-bold text-xs">
-                            Missed
-                          </span>
-                        </div>
-                      )}
+                      {statusOverlay}
                       <div className="flex flex-col items-center gap-1 text-center">
                         {meal.image_url ? (
                           <img

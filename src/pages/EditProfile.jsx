@@ -2,59 +2,48 @@ import React, { useEffect, useState, useMemo } from "react";
 import { supabase } from "../supabaseClient";
 import { useNavigate } from "react-router-dom";
 import { FiArrowLeft, FiSave } from "react-icons/fi";
+import {
+  calculateBMR,
+  getActivityMultiplier,
+  calculateMacros,
+} from "../utils/calculateHealth";
 
 export default function EditProfile() {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  // --- Constant options memoized ---
-
+  // --- Options ---
   const allergenOptions = useMemo(
     () => [
-      // Legumes / Soy
       { name: "Peanuts", category: "Legume" },
       { name: "Tree nuts", category: "Legume" },
       { name: "Soy", category: "Legume" },
       { name: "Soy sauce", category: "Legume" },
       { name: "Miso", category: "Legume" },
       { name: "Tofu", category: "Legume" },
-
-      // Meat
       { name: "Chicken", category: "Meat" },
       { name: "Beef", category: "Meat" },
       { name: "Pork", category: "Meat" },
       { name: "Liver", category: "Meat" },
-
-      // Seafood
       { name: "Fish", category: "Seafood" },
-      { name: "Tilapia", category: "Seafood" },
-      { name: "Bangus", category: "Seafood" },
       { name: "Shellfish", category: "Seafood" },
       { name: "Shrimp", category: "Seafood" },
       { name: "Prawns", category: "Seafood" },
       { name: "Mussels", category: "Seafood" },
       { name: "Squid", category: "Seafood" },
-
-      // Eggs
       { name: "Egg", category: "Egg" },
-
-      // Grains / Gluten
       { name: "Wheat", category: "Grain" },
       { name: "Gluten", category: "Grain" },
       { name: "Noodles", category: "Grain" },
       { name: "Wrappers", category: "Grain" },
       { name: "Breadcrumbs", category: "Grain" },
       { name: "Flour", category: "Grain" },
-
-      // Dairy
       { name: "Dairy", category: "Dairy" },
       { name: "Milk", category: "Dairy" },
       { name: "Condensed milk", category: "Dairy" },
       { name: "Cream", category: "Dairy" },
       { name: "Butter", category: "Dairy" },
-
-      // Others
       { name: "Coconut", category: "Other" },
       { name: "Corn", category: "Other" },
     ],
@@ -110,25 +99,18 @@ export default function EditProfile() {
           health_conditions: Array.isArray(data?.health_conditions)
             ? data.health_conditions
             : data?.health_conditions?.split(",").map((h) => h.trim()) || [],
-
           allergens: Array.isArray(data?.allergens)
             ? data.allergens
             : data?.allergens?.split(",").map((a) => a.trim()) || [],
-
           goal: data?.goal ? data.goal.split(",").map((g) => g.trim()) : [],
         });
-
       setLoading(false);
     })();
   }, [navigate]);
 
-  // --- Generic field handlers ---
+  // --- Handlers ---
   const handleChange = (e) =>
     setProfile((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-
-  const handleGoalSelect = (value) => {
-    setProfile((prev) => ({ ...prev, goal: value }));
-  };
 
   const handleMultiSelect = (name, value) =>
     setProfile((prev) => {
@@ -148,6 +130,7 @@ export default function EditProfile() {
     return (profile.weight_kg / (h * h)).toFixed(1);
   }, [profile?.weight_kg, profile?.height_cm]);
 
+  // --- Save ---
   const handleSave = async (e) => {
     e.preventDefault();
     const {
@@ -155,42 +138,19 @@ export default function EditProfile() {
     } = await supabase.auth.getUser();
     if (!user) return;
 
-    // BMR + calories
     const { gender, weight_kg, height_cm, age, activity_level, goal } = profile;
-    let bmr =
-      gender === "Male"
-        ? 10 * weight_kg + 6.25 * height_cm - 5 * age + 5
-        : 10 * weight_kg + 6.25 * height_cm - 5 * age - 161;
-    const multiplier =
-      {
-        Sedentary: 1.2,
-        "Lightly Active": 1.375,
-        "Moderately Active": 1.55,
-        "Very Active": 1.725,
-      }[activity_level] || 1.2;
-    let calories = bmr * multiplier;
-    if (goal === "Weight loss") calories -= 500;
-    if (goal === "Optimized athletic performance") calories += 300;
-    calories = Math.max(1200, calories);
+    const bmr = calculateBMR(weight_kg, height_cm, age, gender);
+    const tdee = bmr * getActivityMultiplier(activity_level);
+    const macros = calculateMacros(goal, tdee);
 
     const updatedProfile = {
-      full_name: profile.full_name,
-      age: profile.age,
-      gender,
-      height_cm,
-      weight_kg,
-      birthday: profile.birthday,
-      timeframe: profile.timeframe,
-      activity_level,
-      goal: profile.goal.join(","),
-      eating_style: profile.eating_style,
-      health_conditions: profile.health_conditions,
-      allergens: profile.allergens,
+      ...profile,
+      goal: goal.join(","),
+      calorie_needs: Math.round(macros.calories),
+      protein_needed: Math.round(macros.protein),
+      fats_needed: Math.round(macros.fat),
+      carbs_needed: Math.round(macros.carbs),
       bmi,
-      calorie_needs: Math.round(calories),
-      protein_needed: Math.round((calories * 0.25) / 4),
-      fats_needed: Math.round((calories * 0.25) / 9),
-      carbs_needed: Math.round((calories * 0.5) / 4),
     };
 
     const { error } = await supabase
@@ -203,8 +163,8 @@ export default function EditProfile() {
 
   if (loading)
     return (
-      <div className="flex justify-center items-center min-h-screen bg-green-50">
-        <p className="text-green-700 animate-pulse">Loading profile...</p>
+      <div className="flex justify-center items-center min-h-screen bg-green-50 text-green-700 animate-pulse">
+        Loading profile...
       </div>
     );
   if (!profile)
@@ -248,18 +208,13 @@ export default function EditProfile() {
       </select>
     </div>
   );
-  const TagSelector = ({
-    options,
-    selected,
-    name,
-    handleMultiSelect,
-    handleClick, // optional
-  }) => {
+
+  const TagSelector = ({ options, selected, name, handleMultiSelect }) => {
     const groupedOptions = options.reduce((acc, opt) => {
       const isObject = typeof opt === "object";
       const category = isObject ? opt.category : "";
       if (!acc[category]) acc[category] = [];
-      acc[category].push(opt);
+      acc[category].push(isObject ? opt.name : opt);
       return acc;
     }, {});
 
@@ -267,27 +222,26 @@ export default function EditProfile() {
       <div className="space-y-2">
         {Object.keys(groupedOptions).map((category) => (
           <div key={category}>
-            <p className="text-xs font-semibold text-gray-500 mb-1">
-              {category}
-            </p>
+            {category && (
+              <p className="text-xs font-semibold text-gray-500 mb-1">
+                {category}
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
-              {groupedOptions[category].map((opt) => {
-                const value = typeof opt === "object" ? opt.name : opt;
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => handleMultiSelect(name, value)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                      selected.includes(value)
-                        ? "bg-lime-500 text-black shadow-sm"
-                        : "bg-black text-white hover:bg-green-50"
-                    }`}
-                  >
-                    {value}
-                  </button>
-                );
-              })}
+              {groupedOptions[category].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => handleMultiSelect(name, value)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                    selected.includes(value)
+                      ? "bg-lime-500 text-black shadow-sm"
+                      : "bg-black text-white hover:bg-green-50"
+                  }`}
+                >
+                  {value}
+                </button>
+              ))}
             </div>
           </div>
         ))}
@@ -299,7 +253,7 @@ export default function EditProfile() {
     <div className="min-h-screen bg-gradient-to-br from-green-100 via-white to-green-200 flex justify-center items-center px-4 py-8">
       <form
         onSubmit={handleSave}
-        className="bg-white w-[375px]  h-[700px] rounded-3xl shadow-2xl overflow-hidden flex flex-col border border-green-100"
+        className="bg-white w-[375px] h-[700px] rounded-3xl shadow-2xl overflow-hidden flex flex-col border border-green-100"
       >
         <div className="bg-black w-full h-[130px] rounded-t-3xl flex flex-col px-2 pt-2 relative">
           <div className="bg-black h-[60px] flex items-center justify-between px-5 rounded-t-3xl shadow-md">
@@ -321,6 +275,7 @@ export default function EditProfile() {
             </button>
           </div>
         </div>
+
         <div className="p-6 space-y-5 overflow-y-auto hide-scrollbar bg-gradient-to-b from-white to-green-50">
           <InputField
             label="Full Name"
@@ -381,42 +336,37 @@ export default function EditProfile() {
               Goals
             </label>
             <TagSelector
-              options={goalOptions} // strings
-              selected={profile.goal} // array
+              options={goalOptions}
+              selected={profile.goal}
               name="goal"
               handleMultiSelect={handleMultiSelect}
             />
           </div>
-
           <div className="border rounded-2xl p-2">
             <label className="block text-sm font-semibold text-gray-700 mb-1">
               Allergens
             </label>
             <TagSelector
-              options={allergenOptions} // objects
-              selected={profile.allergens} // ["Chicken", "Milk", ...]
+              options={allergenOptions}
+              selected={profile.allergens}
               name="allergens"
               handleMultiSelect={handleMultiSelect}
             />
           </div>
-
           <div className="border rounded-lg p-2">
             <label className="block text-sm font-semibold text-gray-700 mb-1">
               Health Conditions
             </label>
             <TagSelector
-              options={healthConditionOptions} // strings
+              options={healthConditionOptions}
               selected={profile.health_conditions}
               name="health_conditions"
               handleMultiSelect={handleMultiSelect}
             />
           </div>
-
           {bmi && (
-            <div className="mt-5 p-3 border rounded-xl bg-black">
-              <p className="text-sm font-medium text-white">
-                Current BMI: <span className="font-bold text-white">{bmi}</span>
-              </p>
+            <div className="mt-5 p-3 border rounded-xl bg-black text-white font-medium">
+              Current BMI: {bmi}
             </div>
           )}
         </div>

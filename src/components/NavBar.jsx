@@ -33,7 +33,7 @@ const Navbar = () => {
     <nav className="shadow-md px-6 py-4 flex justify-between items-center fixed w-full z-50">
       {/* Logo */}
       <div
-        className="text-2xl font-bold text-white cursor-pointer"
+        className="text-2xl font-bold text-black cursor-pointer"
         onClick={() => navigate(session ? "/personaldashboard" : "/")}
       >
         Smart<span className="text-lime-500">Genie </span>.

@@ -334,90 +334,198 @@ export default function Mealplan({ userId }) {
     [memoizedWeeklyPlan.start_date, memoizedWeeklyPlan.end_date]
   );
 
+  const canRegenerate = useMemo(() => {
+    if (!weeklyPlan?.plan?.length) return true;
+
+    if (weeklyPlan.end_date) {
+      const planEndDate = new Date(weeklyPlan.end_date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (planEndDate < today) return true;
+    }
+
+    for (const day of weeklyPlan.plan) {
+      if (day.meals.some((meal) => meal.status === "added")) {
+        return false;
+      }
+    }
+
+    return true;
+  }, [weeklyPlan]);
+
+  const handleRegenerateMealPlan = async () => {
+    if (!canRegenerate) {
+      setAlertMessage(
+        "You cannot regenerate a meal plan with logged meals. A new plan can be generated once the current one is complete."
+      );
+      setShowAlertModal(true);
+      return;
+    }
+
+    if (!profile || !dishes.length) return;
+
+    setLoading(true);
+
+    try {
+      const newPlan = createSmartWeeklyMealPlan(profile, dishes);
+
+      // Mark already added meals
+      const updatedPlan = markAddedMeals(newPlan, mealLog);
+
+      // Update state
+      setWeeklyPlan(updatedPlan);
+
+      // Save to localStorage
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        localStorage.setItem(
+          `weeklyPlan_${user.id}`,
+          JSON.stringify(updatedPlan)
+        );
+
+        // Update Supabase profile
+        const planStartISO = new Date(newPlan.start_date).toISOString();
+        const planEndISO = new Date(newPlan.end_date).toISOString();
+        const safePlanJSON = JSON.parse(JSON.stringify(newPlan));
+
+        const { error: updateError } = await supabase
+          .from("health_profiles")
+          .update({
+            plan_start_date: planStartISO,
+            plan_end_date: planEndISO,
+            weekly_plan_json: safePlanJSON,
+          })
+          .eq("user_id", user.id);
+
+        if (updateError) console.error("Supabase update error:", updateError);
+      }
+
+      setAlertMessage("Meal plan regenerated successfully!");
+      setShowAlertModal(true);
+    } catch (error) {
+      console.error("Error regenerating meal plan:", error);
+      setAlertMessage("Failed to regenerate meal plan. Please try again.");
+      setShowAlertModal(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (loading) return <MealPlanLoader timeframe={profile?.timeframe} />;
   if (!profile) return <NoProfile onNavigate={navigate} />;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-green-100 flex justify-center items-center p-4">
-      <div className="bg-white w-[375px] h-[700px] rounded-3xl shadow-2xl overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="bg-white w-full h-[130px] rounded-t-3xl flex flex-col px-2 pt-2 relative border-b-4 border-black">
-          <div className="flex justify-between items-start mb-6">
-            <div className="p-5">
-              <p className="text-m font-semibold text-black">
-                Good {timeOfDay}{" "}
-                <span className="text-black font-bold">
-                  {profile?.full_name}!
-                </span>
-              </p>
-              <p className="text-s font-medium flex items-center gap-2 text-black">
-                Here's your meal plan for today
-              </p>
+      <div className="bg-white w-[375px] h-[700px] rounded-3xl shadow-2xl overflow-hidden relative">
+        <div className="h-full overflow-auto pb-20">
+          {/* Header */}
+          <div className="bg-white w-full h-[130px] rounded-t-3xl flex flex-col px-2 pt-2 relative border-b-4 border-black">
+            <div className="flex justify-between items-start mb-6">
+              <div className="p-5">
+                <p className="text-m font-semibold text-black">
+                  Good {timeOfDay}{" "}
+                  <span className="text-black font-bold">
+                    {profile?.full_name}!
+                  </span>
+                </p>
+                <p className="text-s font-medium flex items-center gap-2 text-black">
+                  Here's your meal plan for today
+                </p>
+              </div>
             </div>
+          </div>
+
+          {/* Content */}
+          <div className="p-4 space-y-2">
+            <div className="flex justify-between items-center mb-2">
+              {/* Date Range */}
+              {dateRange && (
+                <p className="text-sm font-medium text-black">
+                  {dateRange.start} – {dateRange.end} ({profile.timeframe || 7}{" "}
+                  Days)
+                  <span className="relative inline-flex ml-1 group">
+                    <FaInfoCircle className="text-red-700 cursor-pointer" />
+                    <span
+                      className="absolute left-full top-1/2 ml-2 max-w-xs
+                     bg-green-600 text-white text-xs rounded px-2 py-1
+                     opacity-0 group-hover:opacity-100 transition-opacity z-10
+                     break-words text-left"
+                    >
+                      Once you update your health profile, the generation of
+                      meals and dishes will adjust accordingly.
+                    </span>
+                  </span>
+                </p>
+              )}
+
+              {/* Regenerate Button */}
+              <div className="relative group flex items-center">
+                <button
+                  onClick={handleRegenerateMealPlan}
+                  disabled={!canRegenerate}
+                  className={`px-3 py-1 text-white rounded-lg shadow transition text-xs ${
+                    !canRegenerate
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-green-600 hover:bg-green-700"
+                  }`}
+                >
+                  Regenerate
+                </button>
+
+                {!canRegenerate && (
+                  <span className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 max-w-xs bg-gray-600 text-white text-xs text-center rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity z-50 break-words shadow-lg">
+                    You cannot regenerate a meal plan with logged meals. A new
+                    plan can be generated once the current one is complete.
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <MealPlanGrid
+              weeklyPlan={memoizedWeeklyPlan}
+              mealTypes={mealTypes}
+              onOpenDish={handleOpenDish}
+            />
+
+            {/* AlertModal with fade */}
+            {showAlertModal && (
+              <AlertModal
+                message={alertMessage}
+                visible={alertVisible} // NEW
+                onClose={() => setShowAlertModal(false)}
+              />
+            )}
+
+            {selectedDish && (
+              <DishDetailModal
+                dish={selectedDish}
+                onClose={() => setSelectedDish(null)}
+                onServingSizeChange={handleServingSizeChange}
+                onIngredientAmountChange={handleIngredientAmountChange}
+                onAddMeal={handleAddMeal}
+                boholCities={boholCities}
+                selectedCityId={selectedCityId}
+                onCityChange={setSelectedCityId}
+                storeTypeFilters={storeTypeFilters}
+                onStoreTypeFilterChange={(type) =>
+                  setStoreTypeFilters((prev) =>
+                    prev.includes(type)
+                      ? prev.filter((x) => x !== type)
+                      : [...prev, type]
+                  )
+                }
+                storeRecommendations={storeRecommendations}
+              />
+            )}
           </div>
         </div>
 
-        {/* Scrollable Content */}
-        <div className="p-4 flex-1 space-y-2 overflow-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          {dateRange && (
-            <p className="text-sm font-medium mb-2">
-              {dateRange.start} – {dateRange.end} ({profile.timeframe || 7}{" "}
-              Days)
-              <span className="relative inline-flex ml-1 group">
-                <FaInfoCircle className="text-red-700 cursor-pointer" />
-                <span
-                  className="absolute left-full top-1/2 ml-2 max-w-xs
-                   bg-green-600 text-white text-xs rounded px-2 py-1
-                   opacity-0 group-hover:opacity-100 transition-opacity z-10
-                   break-words text-left"
-                >
-                  Once you update your health profile, the generation of meals
-                  and dishes will adjust accordingly.
-                </span>
-              </span>
-            </p>
-          )}
-
-          <MealPlanGrid
-            weeklyPlan={memoizedWeeklyPlan}
-            mealTypes={mealTypes}
-            onOpenDish={handleOpenDish}
-          />
-
-          {/* AlertModal with fade */}
-          {showAlertModal && (
-            <AlertModal
-              message={alertMessage}
-              visible={alertVisible} // NEW
-              onClose={() => setShowAlertModal(false)}
-            />
-          )}
-
-          {selectedDish && (
-            <DishDetailModal
-              dish={selectedDish}
-              onClose={() => setSelectedDish(null)}
-              onServingSizeChange={handleServingSizeChange}
-              onIngredientAmountChange={handleIngredientAmountChange}
-              onAddMeal={handleAddMeal}
-              boholCities={boholCities}
-              selectedCityId={selectedCityId}
-              onCityChange={setSelectedCityId}
-              storeTypeFilters={storeTypeFilters}
-              onStoreTypeFilterChange={(type) =>
-                setStoreTypeFilters((prev) =>
-                  prev.includes(type)
-                    ? prev.filter((x) => x !== type)
-                    : [...prev, type]
-                )
-              }
-              storeRecommendations={storeRecommendations}
-            />
-          )}
-        </div>
-
         {/* Footer */}
-        <FooterNav />
+        <div className="absolute bottom-0 left-0 right-0">
+          <FooterNav />
+        </div>
       </div>
     </div>
   );

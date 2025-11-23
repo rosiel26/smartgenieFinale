@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiArrowLeft } from "react-icons/fi";
-import { supabase } from "../supabaseClient";
-import { motion } from "framer-motion";
 import { FaMars, FaVenus } from "react-icons/fa";
+import { motion } from "framer-motion";
+import { supabase } from "../supabaseClient";
+import {
+  calculateBMR,
+  getActivityMultiplier,
+  calculateMacros,
+} from "../utils/calculateHealth";
 
 export default function CreateProfile() {
   const navigate = useNavigate();
-
-  // --- Core UI & Flow ---
   const [step, setStep] = useState(1);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -42,7 +45,14 @@ export default function CreateProfile() {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  // --- Eating Preferences ---
+  const toggleArrayItem = (field, item) => {
+    const currentArray = formData[field];
+    const newArray = currentArray.includes(item)
+      ? currentArray.filter((i) => i !== item)
+      : [...currentArray, item];
+    handleInputChange(field, newArray);
+  };
+
   const [eatingStyles] = useState([
     {
       name: "Balanced",
@@ -66,7 +76,6 @@ export default function CreateProfile() {
     },
   ]);
 
-  // --- Allergens ---
   const [allergenCategories] = useState([
     { name: "Meat", items: ["Beef", "Pork", "Chicken", "Turkey"] },
     {
@@ -76,22 +85,18 @@ export default function CreateProfile() {
     { name: "Dairy", items: ["Milk", "Cheese", "Butter", "Yogurt"] },
   ]);
 
-  // --- Health Conditions ---
   const [healthOptions] = useState([
     "Diabetes",
     "High blood pressure",
     "Heart disease",
     "Kidney Disease",
   ]);
-
-  // --- Activity Options ---
   const [activityOptions] = useState([
     "Sedentary",
     "Lightly active",
     "Moderately active",
     "Very active",
   ]);
-
   const [goalOptions] = useState([
     "Weight loss",
     "Improve physical health",
@@ -101,33 +106,20 @@ export default function CreateProfile() {
     "Eating a balanced diet",
   ]);
 
-  // ----------------- Utility Functions -----------------
-  const toggleArrayItem = (field, item) => {
-    const currentArray = formData[field];
-    const newArray = currentArray.includes(item)
-      ? currentArray.filter((i) => i !== item)
-      : [...currentArray, item];
-    handleInputChange(field, newArray);
-  };
-
   const toggleAllergen = (item) => toggleArrayItem("selectedAllergens", item);
-  
+
   const selectAllInCategory = (categoryName) => {
     const category = allergenCategories.find((c) => c.name === categoryName);
     if (!category) return;
     const allSelected = category.items.every((i) =>
       formData.selectedAllergens.includes(i)
     );
-    if (allSelected) {
-      handleInputChange(
-        "selectedAllergens",
-        formData.selectedAllergens.filter((i) => !category.items.includes(i))
-      );
-    } else {
-      handleInputChange("selectedAllergens", [
-        ...new Set([...formData.selectedAllergens, ...category.items]),
-      ]);
-    }
+    handleInputChange(
+      "selectedAllergens",
+      allSelected
+        ? formData.selectedAllergens.filter((i) => !category.items.includes(i))
+        : [...new Set([...formData.selectedAllergens, ...category.items])]
+    );
   };
 
   const getHeightInCm = () =>
@@ -141,67 +133,6 @@ export default function CreateProfile() {
       ? parseFloat(formData.weight) || 0
       : (parseFloat(formData.weight) || 0) / 2.20462;
 
-  const calculateBMR = (weightKg, heightCm, age, gender) =>
-    gender === "male"
-      ? 10 * weightKg + 6.25 * heightCm - 5 * age + 5
-      : 10 * weightKg + 6.25 * heightCm - 5 * age - 161;
-
-  const getActivityMultiplier = (level) =>
-    ({
-      Sedentary: 1.2,
-      "Lightly active": 1.375,
-      "Moderately active": 1.55,
-      "Very active": 1.725,
-    }[level] || 1.2);
-
-  const adjustMacros = (goalsList, baseCalories) => {
-    let proteinPerc = 0.25,
-      fatPerc = 0.3,
-      carbPerc = 0.45,
-      calories = baseCalories;
-    goalsList.forEach((goal) => {
-      switch (goal) {
-        case "Weight loss":
-          calories *= 0.9;
-          proteinPerc += 0.05;
-          fatPerc -= 0.05;
-          break;
-        case "Muscle gain":
-          calories *= 1.1;
-          proteinPerc += 0.05;
-          carbPerc += 0.05;
-          break;
-        case "Boost energy":
-          carbPerc += 0.05;
-          fatPerc -= 0.05;
-          break;
-        case "Managing stress":
-          fatPerc += 0.05;
-          carbPerc -= 0.05;
-          break;
-        case "Improve physical health":
-          fatPerc += 0.05;
-          carbPerc -= 0.05;
-          break;
-        case "Eating a balanced diet":
-          proteinPerc = 0.25;
-          fatPerc = 0.3;
-          carbPerc = 0.45;
-          break;
-      }
-    });
-    const total = proteinPerc + fatPerc + carbPerc;
-    proteinPerc /= total;
-    fatPerc /= total;
-    carbPerc /= total;
-    return {
-      calories: Math.round(calories),
-      protein: Math.round((calories * proteinPerc) / 4),
-      fat: Math.round((calories * fatPerc) / 9),
-      carbs: Math.round((calories * carbPerc) / 4),
-    };
-  };
-
   // ----------------- Fetch User -----------------
   useEffect(() => {
     const checkUser = async () => {
@@ -209,11 +140,7 @@ export default function CreateProfile() {
         const {
           data: { user },
         } = await supabase.auth.getUser();
-        if (!user) {
-          setUser(null);
-          setLoading(false);
-          return;
-        }
+        if (!user) return setLoading(false);
         setUser(user);
         const { data: profile, error } = await supabase
           .from("health_profiles")
@@ -221,10 +148,7 @@ export default function CreateProfile() {
           .eq("user_id", user.id)
           .maybeSingle();
         if (error) console.error(error.message);
-        else if (profile) {
-          navigate("/personaldashboard", { replace: true });
-          return;
-        }
+        else if (profile) navigate("/personaldashboard", { replace: true });
         setLoading(false);
       } catch (err) {
         console.error(err);
@@ -236,49 +160,46 @@ export default function CreateProfile() {
 
   // ----------------- Compute Age -----------------
   useEffect(() => {
-    if (!formData.birthDate) {
-      handleInputChange("age", null);
-      return;
-    }
+    if (!formData.birthDate) return handleInputChange("age", null);
     const birth = new Date(formData.birthDate);
     const today = new Date();
     let calculatedAge = today.getFullYear() - birth.getFullYear();
     const m = today.getMonth() - birth.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate()))
       calculatedAge--;
-    }
     handleInputChange("age", calculatedAge);
   }, [formData.birthDate]);
 
   // ----------------- Compute Health Metrics -----------------
   useEffect(() => {
-    if (!formData.age) {
-      handleInputChange("bmi", null);
-      handleInputChange("calorieNeeds", null);
-      handleInputChange("proteinNeeded", null);
-      handleInputChange("fatsNeeded", null);
-      handleInputChange("carbsNeeded", null);
-      return;
-    }
     const heightCmValue = getHeightInCm();
     const weightKgValue = getWeightInKg();
-    if (heightCmValue <= 0 || weightKgValue <= 0) return;
+    if (!formData.age || heightCmValue <= 0 || weightKgValue <= 0) return;
 
+    // BMI
     const bmiValue = +(weightKgValue / (heightCmValue / 100) ** 2).toFixed(2);
     handleInputChange("bmi", bmiValue);
 
+    // Normalize gender & activity
+    const genderNormalized = formData.gender.toLowerCase();
+    const activityNormalized = formData.activityLevel;
+
+    // BMR & TDEE
     const bmr = calculateBMR(
       weightKgValue,
       heightCmValue,
       formData.age,
-      formData.gender
+      genderNormalized
     );
-    const tdee = bmr * getActivityMultiplier(formData.activityLevel);
-    const macros = adjustMacros(formData.goals, tdee);
+    const tdee = bmr * getActivityMultiplier(activityNormalized);
+
+    // Ensure goals is an array
+    const goalsArray = Array.isArray(formData.goals) ? formData.goals : [];
+    const macros = calculateMacros(goalsArray, tdee);
 
     handleInputChange("calorieNeeds", macros.calories);
     handleInputChange("proteinNeeded", macros.protein);
-    handleInputChange("fatsNeeded", macros.fat);
+    handleInputChange("fatsNeeded", macros.fats);
     handleInputChange("carbsNeeded", macros.carbs);
   }, [
     formData.age,
@@ -293,7 +214,6 @@ export default function CreateProfile() {
     formData.goals,
   ]);
 
-  // ----------------- Step Validation -----------------
   const isStepValid = () => {
     switch (step) {
       case 1:
@@ -319,34 +239,53 @@ export default function CreateProfile() {
 
   const handleBack = () => (step > 1 ? setStep(step - 1) : navigate(-1));
 
+  // ----------------- Handle Continue / Save -----------------
   const handleContinue = async () => {
-    if (!isStepValid()) {
-      if (step === 3) alert("You must be at least 18 years old to continue.");
-      return;
-    }
-
-    if (step < 11) {
-      setStep(step + 1);
-      return;
-    }
+    if (!isStepValid())
+      return step === 3
+        ? alert("You must be at least 18 years old to continue.")
+        : null;
+    if (step < 11) return setStep(step + 1);
 
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) {
-      alert("Please login first");
-      navigate("/login");
-      return;
-    }
+    if (!user) return alert("Please login first") && navigate("/login");
 
-    const { data, error } = await supabase.from("health_profiles").insert([
+    const heightCmValue = getHeightInCm();
+    const weightKgValue = getWeightInKg();
+    const bmiValue =
+      heightCmValue > 0 && weightKgValue > 0
+        ? +(weightKgValue / (heightCmValue / 100) ** 2).toFixed(2)
+        : null;
+    const bmr = bmiValue
+      ? calculateBMR(
+          weightKgValue,
+          heightCmValue,
+          formData.age,
+          formData.gender
+        )
+      : null;
+    const tdee = bmr
+      ? bmr * getActivityMultiplier(formData.activityLevel)
+      : null;
+    const macros = tdee ? calculateMacros(formData.goals, tdee) : {};
+
+    const roundedMacros = {
+      calories: Math.round(macros.calories),
+      protein: Math.round(macros.protein),
+      fat: Math.round(macros.fat),
+      carbs: Math.round(macros.carbs),
+    };
+
+    const { error } = await supabase.from("health_profiles").insert([
       {
         user_id: user.id,
         full_name: formData.fullName,
         birthday: formData.birthDate,
         gender: formData.gender,
-        height_cm: getHeightInCm(),
-        weight_kg: getWeightInKg(),
+        height_cm: heightCmValue,
+        weight_kg: weightKgValue,
         activity_level: formData.activityLevel,
         goal: formData.goals.join(", "),
         eating_style: formData.selectedStyle,
@@ -354,11 +293,11 @@ export default function CreateProfile() {
         allergens: formData.selectedAllergens,
         health_conditions: formData.healthConditions,
         age: formData.age,
-        bmi: formData.bmi,
-        calorie_needs: formData.calorieNeeds,
-        protein_needed: formData.proteinNeeded,
-        fats_needed: formData.fatsNeeded,
-        carbs_needed: formData.carbsNeeded,
+        bmi: bmiValue,
+        calorie_needs: roundedMacros.calories,
+        protein_needed: roundedMacros.protein,
+        fats_needed: roundedMacros.fat,
+        carbs_needed: roundedMacros.carbs,
         timeframe: formData.goalDays,
       },
     ]);

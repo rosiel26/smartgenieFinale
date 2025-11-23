@@ -1,80 +1,104 @@
-export function calculateHealth({
-  birthMonth,
-  birthYear,
-  gender,
-  heightUnit,
-  heightCm,
-  heightFt,
-  heightIn,
-  weightUnit,
-  weight,
-  activityLevel,
-}) {
-  // Calculate age
-  const currentDate = new Date();
-  const currentYear = currentDate.getFullYear();
-  const currentMonth = currentDate.getMonth() + 1;
+// /utils/calculateHealth.js
 
-  let age = currentYear - parseInt(birthYear);
-  if (currentMonth < parseInt(birthMonth)) age--;
+/**
+ * Calculate BMR using Mifflin-St Jeor Equation
+ * @param {number} weightKg 
+ * @param {number} heightCm 
+ * @param {number} age 
+ * @param {"male"|"female"} gender 
+ * @returns {number} BMR
+ */
+const calculateBMR = (weightKg, heightCm, age, gender) => {
+  const g = gender?.toLowerCase();
+  return g === "male"
+    ? 10 * weightKg + 6.25 * heightCm - 5 * age + 5
+    : 10 * weightKg + 6.25 * heightCm - 5 * age - 161;
+};
 
-  // Enforce minimum age
-  if (age < 15) {
-    throw new Error("User must be at least 15 years old.");
-  }
-
-  // Height in meters
-  let heightInMeters = 0;
-  if (heightUnit === "cm") {
-    heightInMeters = parseFloat(heightCm) / 100;
-  } else {
-    const totalInches = parseFloat(heightFt || 0) * 12 + parseFloat(heightIn || 0);
-    heightInMeters = totalInches * 0.0254;
-  }
-
-  // Weight in kg
-  const weightKg = weightUnit === "kg" ? parseFloat(weight) : parseFloat(weight) * 0.453592;
-
-  // BMI
-  const bmi = weightKg / (heightInMeters * heightInMeters);
-
-  let bmiStatus = "";
-  if (bmi < 18.5) {
-    bmiStatus = "Underweight";
-  } else if (bmi >= 18.5 && bmi < 24.9) {
-    bmiStatus = "Normal weight";
-  } else if (bmi >= 25 && bmi < 29.9) {
-    bmiStatus = "Overweight";
-  } else {
-    bmiStatus = "Obese";
-  }
-
-  // BMR
-  let bmr = 0;
-  if (gender === "Male") {
-    bmr = 10 * weightKg + 6.25 * heightInMeters * 100 - 5 * age + 5;
-  } else if (gender === "Female") {
-    bmr = 10 * weightKg + 6.25 * heightInMeters * 100 - 5 * age - 161;
-  }
-
-  // Activity factor
-  const activityFactors = {
-    Sedentary: 1.2,
-    "Lightly active": 1.375,
-    "Moderately active": 1.55,
-    "Very active": 1.725,
-  };
-
-  const caloriesNeeded = Math.round(bmr * (activityFactors[activityLevel] || 1.2));
-
-  // Calculate fat grams assuming 30% calories from fat
-  const fatGrams = Math.round((caloriesNeeded * 0.3) / 9);
-
+/**
+ * Get activity multiplier based on activity level
+ * @param {string} level 
+ * @returns {number} multiplier
+ */
+const getActivityMultiplier = (level) => {
+  const l = level?.toLowerCase();
   return {
-    age,
-    bmi: bmi.toFixed(1),
-    bmiStatus,
-    caloriesNeeded,
-    fatGrams,        // Added fat grams here
-  };
-}
+    sedentary: 1.2,
+    "lightly active": 1.375,
+    "moderately active": 1.55,
+    "very active": 1.725,
+  }[l] || 1.2;
+};
+
+/**
+ * Calculate BMI
+ * @param {number} weightKg 
+ * @param {number} heightCm 
+ * @returns {number|null} BMI
+ */
+const calculateBMI = (weightKg, heightCm) => {
+  if (!weightKg || !heightCm) return null;
+  const heightM = heightCm / 100;
+  return +(weightKg / (heightM * heightM)).toFixed(1);
+};
+
+/**
+ * Calculate calorie goal and macros based on goals
+ * @param {string[]} goalsList 
+ * @param {number} tdee 
+ * @returns {{calories: number, protein: number, carbs: number, fats: number}}
+ */
+const calculateMacros = (goalsList, tdee) => {
+  let calorieGoal = tdee;
+  const goals = (goalsList || []).map(g => g.toLowerCase());
+
+  if (goals.includes("weight loss")) calorieGoal -= 500;
+  if (goals.includes("boost energy")) calorieGoal += 150;
+  if (goals.includes("managing stress")) calorieGoal += 100;
+  if (goals.includes("optimized athletic performance")) calorieGoal += 300;
+
+  calorieGoal = Math.max(1200, Math.round(calorieGoal));
+
+  let proteinPerc = 0.25, carbPerc = 0.5, fatPerc = 0.25;
+
+  if (goals.includes("weight loss")) {
+    proteinPerc = 0.35; carbPerc = 0.4; fatPerc = 0.25;
+  }
+  if (goals.includes("boost energy") || goals.includes("optimized athletic performance")) {
+    proteinPerc = 0.3; carbPerc = 0.55; fatPerc = 0.15;
+  }
+  if (goals.includes("managing stress")) {
+    proteinPerc = 0.25; carbPerc = 0.45; fatPerc = 0.3;
+  }
+  if (goals.includes("eating a balanced diet") || goals.includes("improve physical health")) {
+    proteinPerc = 0.25; carbPerc = 0.5; fatPerc = 0.25;
+  }
+
+  const protein = Math.round((calorieGoal * proteinPerc) / 4);
+  const carbs = Math.round((calorieGoal * carbPerc) / 4);
+  const fats = Math.round((calorieGoal * fatPerc) / 9);
+
+  return { calories: calorieGoal, protein, carbs, fats };
+};
+
+/**
+ * Full health profile calculation
+ * @param {object} profile - { weightKg, heightCm, age, gender, activityLevel, goalsList }
+ * @returns {object} { bmr, tdee, bmi, calories, protein, carbs, fats }
+ */
+const calculateHealthProfile = ({ weightKg, heightCm, age, gender, activityLevel, goalsList }) => {
+  const bmr = calculateBMR(weightKg, heightCm, age, gender);
+  const tdee = Math.round(bmr * getActivityMultiplier(activityLevel));
+  const bmi = calculateBMI(weightKg, heightCm);
+  const { calories, protein, carbs, fats } = calculateMacros(goalsList, tdee);
+
+  return { bmr, tdee, bmi, calories, protein, carbs, fats };
+};
+
+export {
+  calculateBMR,
+  getActivityMultiplier,
+  calculateBMI,
+  calculateMacros,
+  calculateHealthProfile
+};

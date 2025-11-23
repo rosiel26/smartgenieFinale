@@ -92,6 +92,8 @@ export default function ResultPage() {
   useEffect(() => {
     getBoholCities().then(setBoholCities);
   }, []);
+  console.log("STATE FROM NAVIGATE:", location.state);
+  console.log("dishId:", dishId);
 
   useEffect(() => {
     if (!dish) return;
@@ -108,6 +110,14 @@ export default function ResultPage() {
       return;
     }
 
+    // Use dish.id, which is confirmed to exist in the database.
+    const currentDishId = dish?.id; // UUID from dishinfo
+    if (!currentDishId) {
+      setAlertMessage("Failed to add meal: Dish ID is missing or invalid.");
+      setShowAlertModal(true);
+      return;
+    }
+
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -120,7 +130,7 @@ export default function ResultPage() {
 
     const mealLogData = {
       user_id: user.id,
-      dish_id: parseInt(dish.id, 10),
+      dish_uuid: dish.id, // correct
       dish_name: dish.name,
       meal_date: logDate,
       calories: Number(getNutritionValue(dish.calories)),
@@ -129,15 +139,18 @@ export default function ResultPage() {
       fat: Number(getNutritionValue(dish.fat)),
       meal_type: mealType.toLowerCase(),
     };
-
     const { error } = await supabase.from("meal_logs").insert([mealLogData]);
 
     if (error) {
       setAlertMessage(`Failed to add meal: ${error.message}`);
+      setShowAlertModal(true);
     } else {
       setAlertMessage(`${dish.name} added to ${mealType}!`);
+      setShowAlertModal(true);
+      setTimeout(() => {
+        setShowAlertModal(false);
+      }, 1000); // Auto-close success modal after 1 second
     }
-    setShowAlertModal(true);
   };
 
   const handleSubmitFeedback = async () => {

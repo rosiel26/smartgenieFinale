@@ -10,7 +10,10 @@ import MyStatusDisplay from "../components/MyStatusDisplay";
 import SuggestedDishList from "../components/SuggestedDishList";
 import DisclaimerModal from "../components/DisclaimerModal";
 import RecentMealAndWorkoutLogs from "../components/RecentMealAndWorkoutLogs";
-import { getBoholCities, recommendStoresForIngredients } from "../services/storeService";
+import {
+  getBoholCities,
+  recommendStoresForIngredients,
+} from "../services/storeService";
 
 const PersonalDashboard = React.memo(function PersonalDashboard() {
   const [profile, setProfile] = useState(null);
@@ -677,7 +680,7 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
         carbs: Math.round(totalCarbs * portionMultiplier),
       };
 
-      console.log("New meal entry:", newEntry);
+      // console.log("New meal entry:", newEntry);
 
       const { error } = await supabase.from("meal_logs").insert([newEntry]);
       if (error) {

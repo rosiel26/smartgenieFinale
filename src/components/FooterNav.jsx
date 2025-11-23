@@ -47,33 +47,6 @@ export default function FooterNav() {
         onClick={() => navigate("/workout")}
       />
 
-      {/* Floating Plus Button */}
-      <div className="absolute -top-8 left-1/2 -translate-x-1/2 z-50">
-        <label
-          htmlFor="cameraUpload"
-          className="bg-black text-lime-400 rounded-full shadow-xl w-20 h-20 flex items-center justify-center cursor-pointer transition-all duration-300 active:scale-95 border-4 border-white"
-        >
-          <FiPlus size={40} />
-          <input
-            id="cameraUpload"
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files[0];
-              if (!file) return;
-              const reader = new FileReader();
-              reader.onloadend = () => {
-                const base64Image = reader.result;
-                navigate("/analyze", { state: { image: base64Image } });
-              };
-              reader.readAsDataURL(file);
-            }}
-          />
-        </label>
-      </div>
-
       {/* Meal Plan */}
       <NavButton
         label="Plan"
@@ -83,12 +56,40 @@ export default function FooterNav() {
       />
 
       {/* Settings */}
-      <NavButton
-        label="Settings"
-        icon={<FiSettings size={22} />}
-        active={isProfile}
-        onClick={() => navigate("/settings")}
-      />
+      <div className="relative">
+        <NavButton
+          label="Settings"
+          icon={<FiSettings size={22} />}
+          active={isProfile}
+          onClick={() => navigate("/settings")}
+        />
+        {/* Floating Plus Button */}
+        <div className="absolute -top-10 left-1/2 -translate-x-1/2">
+          <label
+            htmlFor="cameraUpload"
+            className="bg-black text-lime-400 rounded-full shadow-xl w-14 h-14 flex items-center justify-center cursor-pointer transition-all duration-300 active:scale-95 border-4 border-white"
+          >
+            <FiPlus size={28} />
+            <input
+              id="cameraUpload"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  const base64Image = reader.result;
+                  navigate("/analyze", { state: { image: base64Image } });
+                };
+                reader.readAsDataURL(file);
+              }}
+            />
+          </label>
+        </div>
+      </div>
     </div>
   );
 }

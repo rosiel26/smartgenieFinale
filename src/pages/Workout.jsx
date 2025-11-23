@@ -1,16 +1,47 @@
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { supabase } from "../supabaseClient";
 import { useNavigate } from "react-router-dom";
-import { FaClock, FaSearch } from "react-icons/fa";
+import { FaSearch } from "react-icons/fa";
 import FooterNav from "../components/FooterNav";
 
-// Custom hook to fetch user profile
+// ---------------------------
+// Helpers
+// ---------------------------
+
+const calculateCaloriesBurned = (met, weightKg, durationMinutes) => {
+  const durationHours = durationMinutes / 60;
+  return Math.round(met * weightKg * durationHours);
+};
+
+const isWorkoutSafe = (workout, userHealthConditions = []) => {
+  const unsafe = (workout.unsuitable_for || []).map((hc) =>
+    hc.toLowerCase().trim()
+  );
+  const userHC = (userHealthConditions || []).map((hc) =>
+    hc.toLowerCase().trim()
+  );
+  const conflicts = unsafe.filter((hc) => userHC.includes(hc));
+  return {
+    safe: conflicts.length === 0,
+    conflicts, // list of conflicting health conditions
+  };
+};
+
+const getIntensityBadge = (met) => {
+  if (met < 4) return { label: "Low", color: "bg-green-100 text-green-700" };
+  if (met < 8)
+    return { label: "Medium", color: "bg-yellow-100 text-yellow-700" };
+  return { label: "High", color: "bg-red-100 text-red-700" };
+};
+
+// ---------------------------
+// Hooks
+// ---------------------------
+
 const useUserProfile = (userId) => {
   const [profile, setProfile] = useState(null);
-
   useEffect(() => {
     if (!userId) return;
-
     const fetchProfile = async () => {
       const { data, error } = await supabase
         .from("health_profiles")
@@ -21,187 +52,225 @@ const useUserProfile = (userId) => {
         .single();
       if (!error) setProfile(data);
     };
-
     fetchProfile();
   }, [userId]);
-
   return profile;
 };
 
-// Custom hook to fetch workout data
-const useWorkouts = (userId, profile) => {
+const useWorkoutTypes = () => {
   const [workoutTypes, setWorkoutTypes] = useState([]);
-  const [workouts, setWorkouts] = useState([]);
-
-  const fetchWorkouts = async () => {
-    if (!userId) return;
-    const { data } = await supabase
-      .from("workouts")
-      .select(
-        "id,duration,calories_burned,fat_burned,carbs_burned,created_at,workout_types(id,name,unsuitable_for,image_url)"
-      )
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false });
-
-    const userHealthConditionsLower = (profile?.health_conditions || []).map(
-      (hc) => hc.toLowerCase().trim()
-    );
-
-    const safeWorkouts = (data || []).filter((w) => {
-      const unsafeLower = (w.workout_types?.unsuitable_for || []).map((hc) =>
-        hc.toLowerCase().trim()
-      );
-      return !unsafeLower.some((hc) => userHealthConditionsLower.includes(hc));
-    });
-
-    setWorkouts(safeWorkouts);
-  };
-
   useEffect(() => {
     const fetchWorkoutTypes = async () => {
       const { data, error } = await supabase.from("workout_types").select("*");
       if (!error) setWorkoutTypes(data);
     };
     fetchWorkoutTypes();
-    fetchWorkouts();
-  }, [userId, profile]);
-
-  return { workoutTypes, workouts, fetchWorkouts };
+  }, []);
+  return workoutTypes;
 };
 
-const shuffleArray = (array) => {
-  if (!Array.isArray(array) || array.length === 0) return [];
-  const newArr = [...array];
-  for (let i = newArr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [newArr[i], newArr[j]] = [newArr[j], newArr[i]];
-  }
-  return newArr.slice(0, 6);
-};
+// ---------------------------
+// Components
+// ---------------------------
+const WorkoutCard = ({ workout, profile, onClick }) => {
+  const intensity = getIntensityBadge(workout.met_value);
+  const estimatedCalories = profile
+    ? calculateCaloriesBurned(workout.met_value, profile.weight_kg, 30)
+    : 0;
 
-const WorkoutCard = ({ workout, onClick }) => (
-  <div
-    onClick={onClick}
-    className="relative border border-green-100 rounded-2xl shadow-sm cursor-pointer hover:bg-green-100 transition overflow-hidden"
-    style={{ height: "160px" }}
-  >
-    {workout.image_url ? (
-      <img
-        src={workout.image_url}
-        alt={workout.name}
-        className="w-full h-full object-cover rounded-2xl"
-      />
-    ) : (
-      <div className="w-full h-full bg-gray-200 flex items-center justify-center text-xs">
-        N/A
+  // If there are health conflicts, join them as a string
+  const healthConflicts = workout.health_conflicts?.length
+    ? workout.health_conflicts.join(", ")
+    : null;
+
+  return (
+    <div
+      onClick={onClick}
+      className={`relative border rounded-2xl shadow-md cursor-pointer hover:shadow-xl transition overflow-hidden ${
+        workout.warning ? "opacity-80" : ""
+      }`}
+      style={{ height: "180px" }}
+    >
+      {workout.image_url ? (
+        <img
+          src={workout.image_url}
+          alt={workout.name}
+          className="w-full h-full object-cover rounded-2xl"
+        />
+      ) : (
+        <div className="w-full h-full bg-gray-200 flex items-center justify-center text-xs">
+          No Image
+        </div>
+      )}
+
+      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent p-3 flex flex-col justify-between">
+        {/* Top-left: intensity badge */}
+        <div className="flex flex-col items-start gap-1">
+          <span
+            className={`px-2 py-0.5 rounded text-xs font-medium ${intensity.color}`}
+          >
+            {intensity.label}
+          </span>
+          {healthConflicts && (
+            <span className="px-2 py-0.5 rounded text-xs bg-yellow-100 text-yellow-800">
+              ⚠ {healthConflicts}
+            </span>
+          )}
+        </div>
+
+        {/* Bottom: name, description, estimated calories */}
+        <div>
+          <p className="text-white font-semibold truncate">{workout.name}</p>
+          {workout.description && (
+            <p className="text-white text-xs truncate">{workout.description}</p>
+          )}
+          <span className="text-white text-xs">{estimatedCalories} cal</span>
+
+          {workout.warning && (
+            <div className="absolute top-2 right-2 bg-yellow-200 text-yellow-800 text-xs px-2 py-0.5 rounded font-semibold">
+              {workout.warning}
+            </div>
+          )}
+        </div>
       </div>
-    )}
-    <div className="absolute top-0 left-0 w-full h-12 bg-gradient-to-b from-black/50 to-transparent px-2 flex items-center">
-      <p className="text-white text-sm font-semibold truncate">
-        {workout.name}
-      </p>
     </div>
-  </div>
-);
+  );
+};
 
-const AddWorkoutModal = ({ show, onClose, workout, onAdd, loading }) => {
-  const [duration, setDuration] = useState("");
-  const [modal, setModal] = useState({ show: false, message: "" });
+const AddWorkoutModal = ({
+  show,
+  onClose,
+  workout,
+  profile,
+  onAdd,
+  loading,
+  notRecommended,
+}) => {
+  const [duration, setDuration] = useState("30");
+  if (!show || !workout) return null;
 
-  if (!show) return null;
+  const estimatedCalories = profile
+    ? calculateCaloriesBurned(
+        workout.met_value,
+        profile.weight_kg,
+        Number(duration)
+      )
+    : 0;
 
   const handleAdd = async () => {
-    if (!duration)
-      return setModal({ show: true, message: "Please enter duration" });
+    if (!duration) return alert("Please enter duration");
+    if (notRecommended) {
+      const confirmAdd = window.confirm(
+        "⚠ This workout is not recommended for you. Do you want to continue?"
+      );
+      if (!confirmAdd) return;
+    }
     await onAdd(workout.id, duration);
     onClose();
   };
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 transition-all duration-300"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="relative bg-white rounded-2xl shadow-2xl w-[320px] max-w-[90%] overflow-hidden animate-fadeIn">
-        <div className="relative">
-          {workout.image_url ? (
+      <div className="relative bg-white rounded-2xl shadow-2xl w-[320px] max-w-[90%] overflow-auto max-h-[90vh]">
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 text-red-700 hover:text-red-600 font-bold text-xl z-10"
+        >
+          ✕
+        </button>
+
+        {workout.image_url && (
+          <div className="relative w-full h-32 rounded-lg overflow-hidden">
             <img
               src={workout.image_url}
               alt={workout.name}
-              className="w-full h-32 object-cover"
+              className="w-full h-full object-cover"
             />
-          ) : (
-            <div className="w-full h-32 bg-gradient-to-r from-green-100 to-green-200 flex items-center justify-center text-gray-500 text-sm">
-              No Image
-            </div>
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent flex items-start justify-between px-4 py-2">
-            <h2 className="text-base font-semibold text-white mt-auto mb-1">
+            <h2 className="absolute bottom-2 left-2 text-white text-lg font-semibold bg-black bg-opacity-50 px-2 py-1 rounded">
               {workout.name}
             </h2>
-            <button
-              onClick={onClose}
-              className="text-red-700 font-semibold bg-black/30 hover:bg-black/50 rounded-full w-7 h-7 flex items-center justify-center text-sm transition"
+          </div>
+        )}
+
+        <div className="p-5 text-left">
+          {workout.description && (
+            <p className="text-gray-700 text-xs mb-2 ">{workout.description}</p>
+          )}
+
+          {workout.benefits && (
+            <div className="mb-4">
+              <h4 className="text-gray-700 font-semibold text-sm mb-2">
+                Benefits
+              </h4>
+              <p className="text-gray-600 text-xs text-left whitespace-pre-line">
+                {workout.benefits}
+              </p>
+            </div>
+          )}
+
+          {workout.reference_link && (
+            <a
+              href={workout.reference_link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-green-600 text-[10px] underline mb-3 block hover:text-blue-600"
             >
-              ✕
-            </button>
-          </div>
-        </div>
-        <div className="p-5 text-center">
-          <p className="text-black mb-3 text-sm">Enter workout duration</p>
-          <div className="relative mb-4">
-            <input
-              type="number"
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              min="1"
-              placeholder="30"
-              className="w-full p-2.5 border border-black rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-400 transition text-center text-gray-800 text-sm"
-            />
-            <span className="absolute right-10 top-2.5 text-gray-400 text-xs">
-              min
-            </span>
-          </div>
+              Click to learn more about {workout.name}.
+            </a>
+          )}
+
+          <p className="text-gray-600 mb-3">Enter workout duration (minutes)</p>
+          <input
+            type="number"
+            min="1"
+            value={duration}
+            onChange={(e) => setDuration(e.target.value)}
+            className="w-full p-2.5 border border-black rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-400 text-center mb-2"
+          />
+
+          <p className="text-sm text-gray-700 mb-3">
+            Estimated Calories Burned:{" "}
+            <span className="font-semibold">{estimatedCalories} cal</span>
+          </p>
+
           <button
             onClick={handleAdd}
-            className="w-full py-2 rounded-xl bg-black text-white hover:bg-gray-700 active:scale-95 transition text-sm font-semibold shadow-sm"
+            className="w-full py-2 rounded-xl bg-black text-white hover:bg-gray-700 active:scale-95 transition font-semibold"
           >
             {loading ? "Adding..." : "Add Workout"}
           </button>
         </div>
       </div>
-      {modal.show && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 shadow-lg max-w-sm text-center">
-            <p className="mb-4">{modal.message}</p>
-            <button
-              onClick={() => setModal({ show: false, message: "" })}
-              className="bg-lime-600 text-white px-4 py-2 rounded hover:bg-lime-700"
-            >
-              OK
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
 
+// ---------------------------
+// Main Component
+// ---------------------------
+
 export default function Workout() {
-  const [selectedWorkout, setSelectedWorkout] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
   const [userId, setUserId] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedWorkout, setSelectedWorkout] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [modal, setModal] = useState({ show: false, message: "" });
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [modalWorkout, setModalWorkout] = useState(null);
+  const [modalMessage, setModalMessage] = useState("");
   const [timeOfDay, setTimeOfDay] = useState("");
 
   const navigate = useNavigate();
   const dropdownRef = useRef(null);
 
+  const profile = useUserProfile(userId);
+  const workoutTypes = useWorkoutTypes();
+  const [showMoreSafeRecommended, setShowMoreSafeRecommended] = useState(false);
+  const [showMoreWarnedRecommended, setShowMoreWarnedRecommended] =
+    useState(false);
+  const [showMoreNotRecommended, setShowMoreNotRecommended] = useState(false);
+
+  // Time of day greeting
   useEffect(() => {
     const hour = new Date().getHours();
     if (hour >= 5 && hour < 12) setTimeOfDay("Morning");
@@ -210,6 +279,7 @@ export default function Workout() {
     else setTimeOfDay("Night");
   }, []);
 
+  // Get current user
   useEffect(() => {
     const getUser = async () => {
       const { data } = await supabase.auth.getUser();
@@ -219,33 +289,80 @@ export default function Workout() {
     getUser();
   }, [navigate]);
 
-  const profile = useUserProfile(userId);
-  const { workoutTypes, fetchWorkouts } = useWorkouts(userId, profile);
+  // ---------------------------
+  // Filter workouts
+  // ---------------------------
+  const {
+    safeRecommendedWorkouts,
+    warnedRecommendedWorkouts,
+    notRecommendedWorkouts,
+  } = useMemo(() => {
+    if (!workoutTypes.length || !profile)
+      return {
+        safeRecommendedWorkouts: [],
+        warnedRecommendedWorkouts: [],
+        notRecommendedWorkouts: [],
+      };
 
-  const recommended = useMemo(() => {
-    if (!workoutTypes.length) return [];
-    if (!profile?.goal) return shuffleArray(workoutTypes);
+    const userGoals = (profile.goal || "")
+      .split(",")
+      .map((g) => g.toLowerCase().trim())
+      .filter(Boolean); // remove empty strings
 
-    const goalLower = profile.goal?.toLowerCase().trim();
-    const userHealthConditionsLower = (profile.health_conditions || []).map(
-      (hc) => hc.toLowerCase().trim()
-    );
+    const userHC = profile.health_conditions || [];
 
-    const matched = workoutTypes.filter((w) => {
-      const suitableForGoal = w.suitable_for?.some(
-        (g) => g.toLowerCase().trim() === goalLower
+    const safeRecommended = [];
+    const warnedRecommended = [];
+    const notRecommended = [];
+
+    workoutTypes.forEach((w) => {
+      // Check health conflicts
+      const { safe: safeForHealth, conflicts: healthConflicts } = isWorkoutSafe(
+        w,
+        userHC
       );
-      const unsafeLower = (w.unsuitable_for || []).map((hc) =>
-        hc.toLowerCase().trim()
-      );
-      const safeForHealth = !unsafeLower.some((hc) =>
-        userHealthConditionsLower.includes(hc)
-      );
-      return suitableForGoal && safeForHealth;
+      const warning =
+        !safeForHealth && healthConflicts.length
+          ? `⚠ Health conflict: ${healthConflicts.join(", ")}`
+          : null;
+
+      // Check goal matching
+      let matchesGoal = true; // default true if no goals
+      if (userGoals.length > 0) {
+        matchesGoal = (w.suitable_for || []).some((suitable) =>
+          userGoals.includes(suitable.toLowerCase().trim())
+        );
+      }
+
+      // Decide which category
+      if (safeForHealth && matchesGoal) {
+        safeRecommended.push(w);
+      } else if (!safeForHealth && matchesGoal) {
+        warnedRecommended.push({ ...w, warning });
+      } else if (safeForHealth && !matchesGoal) {
+        // Safe but doesn’t match goal
+        notRecommended.push(w);
+      } else {
+        // Unsafe and doesn’t match goal
+        notRecommended.push({ ...w, warning });
+      }
     });
 
-    return matched.length > 0 ? matched : shuffleArray(workoutTypes);
-  }, [profile, workoutTypes]);
+    // Sort by MET descending
+    safeRecommended.sort((a, b) => b.met_value - a.met_value);
+    warnedRecommended.sort((a, b) => b.met_value - a.met_value);
+    notRecommended.sort((a, b) => b.met_value - a.met_value);
+
+    return {
+      safeRecommendedWorkouts: safeRecommended,
+      warnedRecommendedWorkouts: warnedRecommended,
+      notRecommendedWorkouts: notRecommended,
+    };
+  }, [workoutTypes, profile]);
+
+  // ---------------------------
+  // Search filter
+  // ---------------------------
 
   const filteredWorkouts = useMemo(() => {
     if (!searchQuery) return workoutTypes;
@@ -254,215 +371,66 @@ export default function Workout() {
     );
   }, [workoutTypes, searchQuery]);
 
-  const checkSafety = (workout) => {
-    const userHealthConditionsLower = (profile?.health_conditions || []).map(
-      (hc) => hc.toLowerCase().trim()
-    );
-    const unsafeLower = (workout.unsuitable_for || []).map((hc) =>
-      hc.toLowerCase().trim()
-    );
-    return unsafeLower.some((hc) => userHealthConditionsLower.includes(hc))
-      ? "Not recommended"
-      : "Recommended";
-  };
-
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target))
-        setShowDropdown(false);
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const handleAddWorkout = async (workoutId, workoutDuration) => {
-    if (!workoutId || !workoutDuration) {
-      setModal({ show: true, message: "Please fill all fields." });
-      setTimeout(() => setModal({ show: false, message: "" }), 1000);
-      return;
-    }
-
-    const workoutType = workoutTypes.find((w) => w.id === workoutId);
-    const userHealthConditionsLower = (profile?.health_conditions || []).map(
-      (hc) => hc.toLowerCase().trim()
-    );
-    const unsafeLower = (workoutType?.unsuitable_for || []).map((hc) =>
-      hc.toLowerCase().trim()
-    );
-
-    if (unsafeLower.some((hc) => userHealthConditionsLower.includes(hc))) {
-      setModal({
-        show: true,
-        message:
-          "This workout is not recommended for your health condition(s).",
-      });
-      setTimeout(() => setModal({ show: false, message: "" }), 1000);
-      return;
-    }
-
+  const handleAddWorkout = async (workoutId, durationMinutes) => {
+    if (!workoutId || !durationMinutes) return alert("Please fill all fields.");
     setLoading(true);
     const { error } = await supabase.from("workouts").insert([
       {
         user_id: userId,
         workout_type_id: workoutId,
-        duration: workoutDuration,
+        duration: durationMinutes,
       },
     ]);
     setLoading(false);
 
-    if (error) {
-      setModal({
-        show: true,
-        message: "Error saving workout: " + error.message,
-      });
-      setTimeout(() => setModal({ show: false, message: "" }), 1000);
-    } else {
-      setModal({ show: true, message: "Workout logged successfully!" });
-      setSelectedWorkout("");
-      setSearchQuery("");
-      fetchWorkouts();
-      setTimeout(() => setModal({ show: false, message: "" }), 1000);
-    }
+    if (error) return alert("Error saving workout: " + error.message);
+    setModalMessage("Workout logged successfully!");
+    setSelectedWorkout(null);
+    setTimeout(() => setModalMessage(""), 2000);
   };
 
-  const exploreWorkouts = useMemo(
-    () => shuffleArray(workoutTypes),
-    [workoutTypes]
-  );
+  // ---------------------------
+  // Render
+  // ---------------------------
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-green-100 flex justify-center items-center p-4">
-      <div className="bg-white w-[375px] h-[700px] rounded-3xl shadow-2xl overflow-hidden flex flex-col ">
-        <div className="bg-black w-full h-[130px] rounded-t-3xl flex flex-col px-2 pt-2 relative">
-          <div className="flex justify-between items-start mb-6">
-            <div className="p-5 ">
-              <p className="text-m font-semibold text-white">
-                Hi <span className="text-green-500">{profile?.full_name},</span>{" "}
-                Good {timeOfDay}!
-              </p>
-              <p className="text-s font-medium flex items-center gap-2 text-white">
-                Ready to start your workout?
-              </p>
-            </div>
-          </div>
+      <div className="bg-white w-[375px] h-[700px] rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="bg-black w-full h-[130px] rounded-t-3xl flex flex-col px-5 pt-5">
+          <p className="text-lg font-semibold text-white">
+            Hi <span className="text-green-400">{profile?.full_name}</span>,
+            Good {timeOfDay}!
+          </p>
+          <p className="text-sm text-white mt-1">
+            Ready to start your workout?
+          </p>
         </div>
 
-        <div className=" p-4 flex-1 space-y-2 overflow-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleAddWorkout(selectedWorkout, undefined);
-            }}
-            className="space-y-5 relative  p-5 rounded-2xl "
-          >
-            <div className="relative" ref={dropdownRef}>
-              <label className="block mb-1 text-sm font-medium text-black">
-                Workout
-              </label>
-              <div className="relative">
-                <FaSearch className="absolute left-3 top-3 text-gray-400" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => {
-                    setSearchQuery(e.target.value);
-                    setShowDropdown(true);
-                  }}
-                  onFocus={() => setShowDropdown(true)}
-                  placeholder="Search workout..."
-                  className="w-full p-2 pl-9 border rounded-lg placeholder-gray-400 "
-                />
-              </div>
-              {showDropdown && (
-                <div className="absolute bg-white border rounded-lg shadow-md mt-1 max-h-48 overflow-y-auto w-full z-20">
-                  {filteredWorkouts.length === 0 ? (
-                    <p className="px-3 py-2 text-xs text-gray-500">
-                      No workouts found.
-                    </p>
-                  ) : (
-                    filteredWorkouts.slice(0, 15).map((w) => {
-                      const status = checkSafety(w);
-                      return (
-                        <div
-                          key={w.id}
-                          onClick={() => {
-                            if (status === "Not recommended") {
-                              setModal({
-                                show: true,
-                                message:
-                                  "This workout is not recommended for your health condition(s).",
-                              });
-                              setTimeout(
-                                () => setModal({ show: false, message: "" }),
-                                3000
-                              );
-                              setShowDropdown(false);
-                            } else {
-                              setSelectedWorkout(w.id);
-                              setSearchQuery(w.name);
-                              setShowDropdown(false);
-                            }
-                          }}
-                          className="px-3 py-2 hover:bg-green-50 cursor-pointer text-sm flex items-center gap-2 justify-between"
-                        >
-                          <div className="flex items-center gap-2">
-                            {w.image_url ? (
-                              <img
-                                src={w.image_url}
-                                alt={w.name}
-                                className="w-6 h-6 rounded-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center text-xs">
-                                N/A
-                              </div>
-                            )}
-                            <span>{w.name}</span>
-                          </div>
-                          <span
-                            className={
-                              status === "Not recommended"
-                                ? "text-red-500 text-xs"
-                                : "text-green-600 text-xs"
-                            }
-                          >
-                            {status}
-                          </span>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              )}
-            </div>
-          </form>
-
-          {/* Recommended Workouts */}
-          <div className="space-y-3 relative p-5">
-            <p className="text-black text-sm font-medium">
-              Recommended Workouts
-            </p>
-            {recommended.length > 0 && (
-              <div className="mt-2 text-sm text-gray-600 flex flex-wrap gap-2">
-                {recommended
-                  .filter((w) => {
-                    const userHealthConditionsLower = (
-                      profile?.health_conditions || []
-                    ).map((hc) => hc.toLowerCase().trim());
-                    const unsafeLower = (w.unsuitable_for || []).map((hc) =>
-                      hc.toLowerCase().trim()
-                    );
-                    return !unsafeLower.some((hc) =>
-                      userHealthConditionsLower.includes(hc)
-                    );
-                  })
-                  .slice(0, 4)
-                  .map((w) => (
-                    <button
+        {/* Body */}
+        <div className="p-4 flex-1 overflow-auto space-y-4">
+          {/* Search */}
+          <div className="relative" ref={dropdownRef}>
+            <FaSearch className="absolute left-3 top-3 text-gray-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search workouts..."
+              className="w-full p-2 pl-9 border rounded-lg placeholder-gray-400 mb-2"
+            />
+            {searchQuery && (
+              <div className="absolute bg-white border rounded-lg shadow-md mt-1 max-h-48 overflow-y-auto w-full z-20">
+                {filteredWorkouts.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-gray-500">
+                    No workouts found.
+                  </p>
+                ) : (
+                  filteredWorkouts.slice(0, 10).map((w) => (
+                    <div
                       key={w.id}
-                      type="button"
-                      onClick={() => setModalWorkout(w)}
-                      className="px-2 py-1 rounded-xl text-black text-xs font-medium flex items-center gap-1 hover:bg-black hover:text-white transition"
+                      onClick={() => setSelectedWorkout(w)}
+                      className="px-3 py-2 hover:bg-green-50 cursor-pointer flex items-center gap-2 text-sm"
                     >
                       {w.image_url ? (
                         <img
@@ -471,80 +439,150 @@ export default function Workout() {
                           className="w-6 h-6 rounded-full object-cover"
                         />
                       ) : (
-                        <div className="w-4 h-4 bg-gray-200 rounded-full flex items-center justify-center text-xs">
+                        <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center text-xs">
                           N/A
                         </div>
                       )}
-                      {w.name}
-                    </button>
-                  ))}
+                      <span>{w.name}</span>
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </div>
 
-          <hr />
+          {/* --------------------------- */}
+          {/* Safe Recommended Workouts */}
+          {/* --------------------------- */}
+          {safeRecommendedWorkouts.length > 0 && (
+            <div className="mb-6">
+              <p className="font-medium text-sm mb-2 text-green-700">
+                Recommended Workouts
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                {(showMoreSafeRecommended
+                  ? safeRecommendedWorkouts
+                  : safeRecommendedWorkouts.slice(0, 4)
+                ).map((w) => (
+                  <WorkoutCard
+                    key={w.id}
+                    workout={w}
+                    profile={profile}
+                    onClick={() => setSelectedWorkout(w)}
+                  />
+                ))}
+              </div>
+              {safeRecommendedWorkouts.length > 4 && (
+                <button
+                  onClick={() =>
+                    setShowMoreSafeRecommended(!showMoreSafeRecommended)
+                  }
+                  className="text-green-600 text-sm mt-2 font-medium"
+                >
+                  {showMoreSafeRecommended ? "Show Less" : "Show More"}
+                </button>
+              )}
+            </div>
+          )}
 
-          {/* Explore Workouts */}
-          <p className="font-bold text-2xl text-center">EXPLORE WORKOUTS</p>
-          <p className="italic text-center text-gray-500">
-            "The only bad workout is the one you didn’t do."
-          </p>
-          {exploreWorkouts.length > 0 && (
-            <div className="grid grid-cols-2 gap-3 mb-4 p-5">
-              {exploreWorkouts.slice(0, 6).map((w) => {
-                const status = checkSafety(w);
-                return (
-                  <div key={w.id} className="relative">
-                    <WorkoutCard
-                      workout={w}
-                      onClick={() => {
-                        if (status === "Not recommended") {
-                          setModal({
-                            show: true,
-                            message:
-                              "This workout is not recommended for your health condition(s).",
-                          });
-                          setTimeout(
-                            () => setModal({ show: false, message: "" }),
-                            1000
-                          );
-                        } else {
-                          setModalWorkout(w);
-                        }
-                      }}
-                    />
-                    <span
-                      className={`absolute bottom-1 left-1 px-2 py-0.5 rounded text-xs font-semibold ${
-                        status === "Not recommended"
-                          ? "bg-red-100 text-red-600"
-                          : "bg-green-100 text-green-600"
-                      }`}
-                    >
-                      {status}
-                    </span>
-                  </div>
-                );
-              })}
+          {/* --------------------------- */}
+          {/* Recommended with Warning */}
+          {/* --------------------------- */}
+          {warnedRecommendedWorkouts.length > 0 && (
+            <div className="mb-6">
+              <p className="font-medium text-sm mb-2 text-yellow-800">
+                Recommended with Warning ⚠
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                {(showMoreWarnedRecommended
+                  ? warnedRecommendedWorkouts
+                  : warnedRecommendedWorkouts.slice(0, 4)
+                ).map((w) => (
+                  <WorkoutCard
+                    key={w.id}
+                    workout={w}
+                    profile={profile}
+                    onClick={() =>
+                      setSelectedWorkout({ ...w, notRecommended: true })
+                    }
+                    notRecommended
+                  />
+                ))}
+              </div>
+              {warnedRecommendedWorkouts.length > 4 && (
+                <button
+                  onClick={() =>
+                    setShowMoreWarnedRecommended(!showMoreWarnedRecommended)
+                  }
+                  className="text-yellow-800 text-sm mt-2 font-medium"
+                >
+                  {showMoreWarnedRecommended ? "Show Less" : "Show More"}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* --------------------------- */}
+          {/* Not Recommended Workouts */}
+          {/* --------------------------- */}
+          {notRecommendedWorkouts.length > 0 && (
+            <div className="mb-6">
+              <p className="font-medium text-sm mb-2 text-red-600">
+                Not Recommended for You
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                {(showMoreNotRecommended
+                  ? notRecommendedWorkouts
+                  : notRecommendedWorkouts.slice(0, 4)
+                ).map((w) => (
+                  <WorkoutCard
+                    key={w.id}
+                    workout={w}
+                    profile={profile}
+                    onClick={() =>
+                      setSelectedWorkout({ ...w, notRecommended: true })
+                    }
+                    notRecommended
+                  />
+                ))}
+              </div>
+              {notRecommendedWorkouts.length > 4 && (
+                <button
+                  onClick={() =>
+                    setShowMoreNotRecommended(!showMoreNotRecommended)
+                  }
+                  className="text-red-600 text-sm mt-2 font-medium"
+                >
+                  {showMoreNotRecommended ? "Show Less" : "Show More"}
+                </button>
+              )}
             </div>
           )}
         </div>
+
+        {/* Footer */}
+
         <FooterNav />
 
-        {modal.show && (
+        {/* Modal */}
+        <AddWorkoutModal
+          show={!!selectedWorkout}
+          onClose={() => setSelectedWorkout(null)}
+          workout={selectedWorkout}
+          profile={profile}
+          onAdd={handleAddWorkout}
+          loading={loading}
+          notRecommended={selectedWorkout?.notRecommended}
+        />
+
+        {/* Success message */}
+        {modalMessage && (
           <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl p-6 shadow-lg max-w-sm text-center">
-              <p className="mb-4">{modal.message}</p>
+              {modalMessage}
             </div>
           </div>
         )}
-
-        <AddWorkoutModal
-          show={!!modalWorkout}
-          onClose={() => setModalWorkout(null)}
-          workout={modalWorkout}
-          onAdd={handleAddWorkout}
-          loading={loading}
-        />
       </div>
     </div>
   );
