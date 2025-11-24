@@ -60,8 +60,10 @@ serve(async (req) => {
     const tablesToClean = [
       "health_profiles",
       "meal_logs", 
+      "workouts",
       "feedback_submissions",
-      "user_roles"
+      "user_roles",
+      "profiles" // This table was added previously and should remain for now
     ];
 
     const cleanupErrors = [];

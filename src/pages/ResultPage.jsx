@@ -11,6 +11,62 @@ import {
   recommendStoresForIngredients,
 } from "../services/storeService";
 
+// Custom Modal Component
+function CustomModal({ isOpen, onClose, title, children, actions }) {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <motion.div
+            className="bg-white rounded-3xl shadow-2xl w-11/12 max-w-md p-6"
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+          >
+            {/* Header */}
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold text-black">{title}</h2>
+              <button
+                onClick={onClose}
+                className="text-black bg-lime-200 hover:bg-lime-300 rounded-full p-1 transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="text-gray-700 text-sm space-y-4">{children}</div>
+
+            {/* Actions */}
+            {actions && (
+              <div className="mt-6 flex justify-end gap-3">
+                {actions.map((action, idx) => (
+                  <button
+                    key={idx}
+                    onClick={action.onClick}
+                    className={`px-4 py-2 rounded-xl font-semibold transition ${
+                      action.variant === "primary"
+                        ? "bg-lime-600 text-white hover:bg-lime-700"
+                        : "bg-gray-200 text-black hover:bg-gray-300"
+                    }`}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 export default function ResultPage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -43,15 +99,11 @@ export default function ResultPage() {
 
   const nutritionMultiplier =
     servingOptions.find((s) => s.label === selectedServing)?.multiplier || 1;
-
   const getNutritionValue = (baseValue) =>
     ((baseValue || 0) * nutritionMultiplier).toFixed(1);
 
   const fetchDish = useCallback(async () => {
-    if (!dishId) {
-      navigate("/", { replace: true });
-      return;
-    }
+    if (!dishId) return navigate("/", { replace: true });
     setLoading(true);
     const { data, error } = await supabase
       .from("dishinfo")
@@ -61,9 +113,8 @@ export default function ResultPage() {
       .eq("id", dishId)
       .single();
 
-    if (error) {
-      setError(`Failed to load dish info: ${error.message}`);
-    } else if (data) {
+    if (error) setError(`Failed to load dish info: ${error.message}`);
+    else if (data)
       setDish({
         id: data.id,
         name: data.name,
@@ -75,7 +126,6 @@ export default function ResultPage() {
         ingredient: data.ingredient || "",
         description: data.description || "",
       });
-    }
     setLoading(false);
   }, [dishId, fallbackImage, navigate]);
 
@@ -92,9 +142,6 @@ export default function ResultPage() {
   useEffect(() => {
     getBoholCities().then(setBoholCities);
   }, []);
-  console.log("STATE FROM NAVIGATE:", location.state);
-  console.log("dishId:", dishId);
-
   useEffect(() => {
     if (!dish) return;
     recommendStoresForIngredients(ingredientList, selectedCityId, {}).then(
@@ -104,19 +151,11 @@ export default function ResultPage() {
 
   const handleAddMeal = async (mealType) => {
     setShowMealTypeModal(false);
-    if (!isLoggedIn || !dish) {
-      setAlertMessage("You must be logged in to add a meal.");
-      setShowAlertModal(true);
-      return;
-    }
-
-    // Use dish.id, which is confirmed to exist in the database.
-    const currentDishId = dish?.id; // UUID from dishinfo
-    if (!currentDishId) {
-      setAlertMessage("Failed to add meal: Dish ID is missing or invalid.");
-      setShowAlertModal(true);
-      return;
-    }
+    if (!isLoggedIn || !dish)
+      return (
+        setShowAlertModal(true),
+        setAlertMessage("You must be logged in to add a meal.")
+      );
 
     const {
       data: { user },
@@ -127,10 +166,9 @@ export default function ResultPage() {
     const logDate = `${today.getFullYear()}-${String(
       today.getMonth() + 1
     ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-
     const mealLogData = {
       user_id: user.id,
-      dish_uuid: dish.id, // correct
+      dish_uuid: dish.id,
       dish_name: dish.name,
       meal_date: logDate,
       calories: Number(getNutritionValue(dish.calories)),
@@ -141,30 +179,24 @@ export default function ResultPage() {
     };
     const { error } = await supabase.from("meal_logs").insert([mealLogData]);
 
-    if (error) {
-      setAlertMessage(`Failed to add meal: ${error.message}`);
-      setShowAlertModal(true);
-    } else {
-      setAlertMessage(`${dish.name} added to ${mealType}!`);
-      setShowAlertModal(true);
-      setTimeout(() => {
-        setShowAlertModal(false);
-      }, 1000); // Auto-close success modal after 1 second
-    }
+    if (error) setAlertMessage(`Failed to add meal: ${error.message}`);
+    else setAlertMessage(`${dish.name} added to ${mealType}!`);
+    setShowAlertModal(true);
+    setTimeout(() => setShowAlertModal(false), 1000);
   };
 
   const handleSubmitFeedback = async () => {
-    if (!isLoggedIn) {
-      setAlertMessage("You must log in first to submit feedback.");
-      setShowAlertModal(true);
-      navigate("/login");
-      return;
-    }
-    if (!feedbackText.trim()) {
-      setAlertMessage("Please enter your feedback.");
-      setShowAlertModal(true);
-      return;
-    }
+    if (!isLoggedIn)
+      return (
+        setAlertMessage("You must log in first to submit feedback."),
+        setShowAlertModal(true),
+        navigate("/login")
+      );
+    if (!feedbackText.trim())
+      return (
+        setAlertMessage("Please enter your feedback."), setShowAlertModal(true)
+      );
+
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -178,59 +210,67 @@ export default function ResultPage() {
       },
     ]);
 
-    if (error) {
-      setAlertMessage(`Failed to submit feedback: ${error.message}`);
-    } else {
-      setAlertMessage("Thank you for your feedback!");
-      setFeedbackText("");
-      setShowFeedbackModal(false);
-    }
+    setAlertMessage(
+      error
+        ? `Failed to submit feedback: ${error.message}`
+        : "Thank you for your feedback!"
+    );
+    setFeedbackText("");
+    setShowFeedbackModal(false);
     setShowAlertModal(true);
   };
 
   if (loading)
-    return <p className="text-center mt-10 animate-pulse">Loading...</p>;
-  if (error) return <p className="text-center mt-10 text-red-600">{error}</p>;
+    return (
+      <p className="text-center mt-10 animate-pulse text-lime-600 font-semibold">
+        Loading...
+      </p>
+    );
+  if (error)
+    return <p className="text-center mt-10 text-red-600 font-bold">{error}</p>;
   if (!dish) return null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-green-100 flex justify-center items-center p-4">
+    <div className="min-h-screen bg-gradient-to-b from-lime-50 via-white to-lime-100 flex justify-center items-center p-4">
       <div className="bg-white w-[375px] h-[700px] rounded-3xl shadow-2xl overflow-hidden flex flex-col">
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          <div className="relative">
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {/* Dish Image */}
+          <div className="relative rounded-2xl overflow-hidden shadow-lg">
             <motion.img
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               src={dish.image}
               alt={dish.name}
-              className="w-full h-60 object-cover rounded-2xl shadow-lg"
+              className="w-full h-64 object-cover"
             />
             {accuracy && (
-              <span className="absolute bottom-3 right-3 bg-green-600 text-white text-xs px-3 py-1 rounded-full">
+              <span className="absolute bottom-3 right-3 bg-lime-600 text-white text-xs font-semibold px-3 py-1 rounded-full shadow-md">
                 {accuracy}% Match
               </span>
             )}
           </div>
 
+          {/* Dish Info */}
           <div className="flex justify-between items-start">
-            <h1 className="text-xl font-bold">{dish.name}</h1>
+            <h1 className="text-2xl font-bold text-black">{dish.name}</h1>
             <button
               onClick={() => setShowFeedbackModal(true)}
-              className="bg-green-500 p-2 rounded-full"
+              className="bg-lime-500 p-3 rounded-full shadow hover:bg-lime-600 transition"
             >
-              <FiMessageCircle className="text-white w-5 h-5" />
+              <FiMessageCircle className="text-white w-6 h-6" />
             </button>
           </div>
 
+          {/* Description */}
           {dish.description && (
-            <p className="text-sm text-gray-700">
+            <p className="text-gray-700 text-sm leading-relaxed">
               {showFullDescription
                 ? dish.description
-                : `${dish.description.slice(0, 100)}...`}
-              {dish.description.length > 100 && (
+                : `${dish.description.slice(0, 120)}...`}
+              {dish.description.length > 120 && (
                 <button
                   onClick={() => setShowFullDescription(!showFullDescription)}
-                  className="text-green-500 text-sm ml-1"
+                  className="text-lime-600 font-medium ml-1"
                 >
                   {showFullDescription ? "Show less" : "Show more"}
                 </button>
@@ -238,13 +278,14 @@ export default function ResultPage() {
             </p>
           )}
 
-          <div className="bg-green-100 rounded-xl p-4 space-y-3">
+          {/* Nutrition */}
+          <div className="bg-lime-50 border border-lime-300 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="font-semibold">Serving:</span>
+              <span className="font-semibold text-black">Serving</span>
               <select
                 value={selectedServing}
                 onChange={(e) => setSelectedServing(e.target.value)}
-                className="border px-2 py-1 rounded"
+                className="border border-lime-300 px-2 py-1 rounded text-black text-sm"
               >
                 {servingOptions.map((s) => (
                   <option key={s.label} value={s.label}>
@@ -253,18 +294,19 @@ export default function ResultPage() {
                 ))}
               </select>
             </div>
+
             {[
-              { label: "Calories", value: dish.calories, color: "bg-red-500" },
-              { label: "Protein", value: dish.protein, color: "bg-blue-500" },
-              { label: "Fat", value: dish.fat, color: "bg-yellow-500" },
-              { label: "Carbs", value: dish.carbs, color: "bg-green-500" },
+              { label: "Calories", value: dish.calories, color: "bg-lime-500" },
+              { label: "Protein", value: dish.protein, color: "bg-black" },
+              { label: "Fat", value: dish.fat, color: "bg-lime-700" },
+              { label: "Carbs", value: dish.carbs, color: "bg-lime-300" },
             ].map(({ label, value, color }) => (
               <div key={label} className="space-y-1">
-                <div className="flex justify-between items-center">
+                <div className="flex justify-between items-center text-sm font-medium text-black">
                   <span>{label}</span>
                   <span>{getNutritionValue(value)}</span>
                 </div>
-                <div className="w-full h-2 bg-green-200 rounded">
+                <div className="w-full h-2 bg-lime-200 rounded">
                   <motion.div
                     initial={{ width: 0 }}
                     animate={{
@@ -280,25 +322,43 @@ export default function ResultPage() {
             ))}
           </div>
 
+          {/* Ingredients Table */}
           {ingredientList.length > 0 && (
-            <div>
-              <h2 className="font-semibold mb-1">Ingredients:</h2>
-              <ul className="list-disc list-inside text-sm">
-                {ingredientList.map((i, idx) => (
-                  <li key={idx}>{i.name}</li>
-                ))}
-              </ul>
+            <div className="overflow-x-auto border border-lime-300 rounded-2xl p-4 bg-white shadow-sm">
+              <h2 className="font-semibold text-black mb-3">Ingredients</h2>
+              <table className="min-w-full text-sm text-left text-black">
+                <thead>
+                  <tr className="bg-lime-100">
+                    <th className="px-4 py-2 font-medium">#</th>
+                    <th className="px-4 py-2 font-medium">Ingredient</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ingredientList.map((ingredient, idx) => (
+                    <tr
+                      key={idx}
+                      className={idx % 2 === 0 ? "bg-lime-50" : "bg-white"}
+                    >
+                      <td className="px-4 py-2">{idx + 1}</td>
+                      <td className="px-4 py-2">{ingredient.name}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
 
+          {/* Stores */}
           {ingredientList.length > 0 && (
-            <div className="border rounded-xl p-3 space-y-3">
+            <div className="border border-lime-300 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="font-semibold">Where to buy (Bohol)</span>
+                <span className="font-semibold text-black">
+                  Where to buy (Bohol)
+                </span>
                 <select
                   value={selectedCityId}
                   onChange={(e) => setSelectedCityId(e.target.value)}
-                  className="border px-2 py-1 rounded"
+                  className="border border-lime-300 px-2 py-1 rounded text-black text-sm"
                 >
                   {boholCities.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -308,10 +368,15 @@ export default function ResultPage() {
                 </select>
               </div>
               {storeRecommendations.map((rec) => (
-                <div key={rec.ingredient.name} className="border p-2 rounded">
-                  <p className="font-medium">{rec.ingredient.name}</p>
+                <div
+                  key={rec.ingredient.name}
+                  className="border border-lime-200 rounded p-2"
+                >
+                  <p className="font-medium text-black">
+                    {rec.ingredient.name}
+                  </p>
                   {rec.stores.length > 0 ? (
-                    <ul className="list-disc list-inside text-sm">
+                    <ul className="list-disc list-inside text-sm text-gray-700">
                       {rec.stores.map((s) => (
                         <li key={s.id}>
                           {s.name} (
@@ -323,40 +388,36 @@ export default function ResultPage() {
                       ))}
                     </ul>
                   ) : (
-                    <p className="text-xs text-gray-500">No stores found</p>
+                    <p className="text-xs text-gray-400">No stores found</p>
                   )}
                 </div>
               ))}
             </div>
           )}
 
+          {/* Add Meal Button */}
           <div className="mt-4">
-            {isLoggedIn ? (
-              <button
-                onClick={() => setShowMealTypeModal(true)}
-                className="w-full bg-green-500 text-white py-3 rounded-xl mb-2"
-              >
-                Add as Meal
-              </button>
-            ) : (
-              <button
-                onClick={() => navigate("/login")}
-                className="w-full bg-green-500 text-white py-3 rounded-xl mb-2"
-              >
-                Continue
-              </button>
-            )}
+            <button
+              onClick={() =>
+                isLoggedIn ? setShowMealTypeModal(true) : navigate("/login")
+              }
+              className="w-full bg-lime-600 hover:bg-lime-700 text-white py-3 rounded-2xl font-semibold shadow transition"
+            >
+              {isLoggedIn ? "Add as Meal" : "Continue"}
+            </button>
           </div>
         </div>
 
         {isLoggedIn && <FooterNav />}
 
+        {/* Meal Type Modal */}
         <MealTypeModal
           isOpen={showMealTypeModal}
           onClose={() => setShowMealTypeModal(false)}
           onSelectMealType={handleAddMeal}
         />
 
+        {/* Alert Modal */}
         {showAlertModal && (
           <AlertModal
             message={alertMessage}
@@ -364,41 +425,32 @@ export default function ResultPage() {
           />
         )}
 
-        <AnimatePresence>
-          {showFeedbackModal && (
-            <motion.div
-              className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <div className="bg-white rounded-2xl shadow-lg w-80 p-5 text-center">
-                <h2 className="font-bold mb-3">Submit Feedback</h2>
-                <textarea
-                  value={feedbackText}
-                  onChange={(e) => setFeedbackText(e.target.value)}
-                  className="w-full border rounded p-2 text-sm focus:ring-2 focus:ring-green-400 outline-none"
-                  rows={3}
-                  placeholder="Your feedback..."
-                />
-                <div className="flex justify-end gap-2 mt-4">
-                  <button
-                    onClick={() => setShowFeedbackModal(false)}
-                    className="px-4 py-2 text-sm text-gray-600"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleSubmitFeedback}
-                    className="px-4 py-2 text-sm bg-green-500 text-white rounded"
-                  >
-                    Submit
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Feedback Modal */}
+        <CustomModal
+          isOpen={showFeedbackModal}
+          onClose={() => setShowFeedbackModal(false)}
+          title="Submit Feedback"
+          actions={[
+            {
+              label: "Cancel",
+              onClick: () => setShowFeedbackModal(false),
+              variant: "secondary",
+            },
+            {
+              label: "Submit",
+              onClick: handleSubmitFeedback,
+              variant: "primary",
+            },
+          ]}
+        >
+          <textarea
+            value={feedbackText}
+            onChange={(e) => setFeedbackText(e.target.value)}
+            className="w-full border border-lime-300 rounded p-2 text-sm focus:ring-2 focus:ring-lime-400 outline-none"
+            rows={4}
+            placeholder="Your feedback..."
+          />
+        </CustomModal>
       </div>
     </div>
   );

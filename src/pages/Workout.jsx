@@ -7,7 +7,6 @@ import FooterNav from "../components/FooterNav";
 // ---------------------------
 // Helpers
 // ---------------------------
-
 const calculateCaloriesBurned = (met, weightKg, durationMinutes) => {
   const durationHours = durationMinutes / 60;
   return Math.round(met * weightKg * durationHours);
@@ -21,10 +20,7 @@ const isWorkoutSafe = (workout, userHealthConditions = []) => {
     hc.toLowerCase().trim()
   );
   const conflicts = unsafe.filter((hc) => userHC.includes(hc));
-  return {
-    safe: conflicts.length === 0,
-    conflicts, // list of conflicting health conditions
-  };
+  return { safe: conflicts.length === 0, conflicts };
 };
 
 const getIntensityBadge = (met) => {
@@ -35,9 +31,59 @@ const getIntensityBadge = (met) => {
 };
 
 // ---------------------------
+// Custom Modals
+// ---------------------------
+const AlertModal = ({ show, message, onClose }) => {
+  if (!show) return null;
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        className="bg-white rounded-xl p-5 shadow-lg max-w-sm text-center"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="text-gray-700 mb-4">{message}</p>
+      </div>
+    </div>
+  );
+};
+
+const ConfirmModal = ({ show, message, onConfirm, onCancel }) => {
+  if (!show) return null;
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      onClick={(e) => e.target === e.currentTarget && onCancel()}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-[300px] max-w-[90%] p-5 text-center"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="text-gray-700 mb-4">{message}</p>
+        <div className="flex justify-between gap-2">
+          <button
+            onClick={onCancel}
+            className="flex-1 py-2 rounded-xl bg-gray-200 hover:bg-gray-300 transition font-semibold"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="flex-1 py-2 rounded-xl bg-black text-white hover:bg-gray-800 transition font-semibold"
+          >
+            Confirm
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------
 // Hooks
 // ---------------------------
-
 const useUserProfile = (userId) => {
   const [profile, setProfile] = useState(null);
   useEffect(() => {
@@ -77,8 +123,6 @@ const WorkoutCard = ({ workout, profile, onClick }) => {
   const estimatedCalories = profile
     ? calculateCaloriesBurned(workout.met_value, profile.weight_kg, 30)
     : 0;
-
-  // If there are health conflicts, join them as a string
   const healthConflicts = workout.health_conflicts?.length
     ? workout.health_conflicts.join(", ")
     : null;
@@ -102,9 +146,7 @@ const WorkoutCard = ({ workout, profile, onClick }) => {
           No Image
         </div>
       )}
-
       <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent p-3 flex flex-col justify-between">
-        {/* Top-left: intensity badge */}
         <div className="flex flex-col items-start gap-1">
           <span
             className={`px-2 py-0.5 rounded text-xs font-medium ${intensity.color}`}
@@ -117,15 +159,12 @@ const WorkoutCard = ({ workout, profile, onClick }) => {
             </span>
           )}
         </div>
-
-        {/* Bottom: name, description, estimated calories */}
         <div>
           <p className="text-white font-semibold truncate">{workout.name}</p>
           {workout.description && (
             <p className="text-white text-xs truncate">{workout.description}</p>
           )}
           <span className="text-white text-xs">{estimatedCalories} cal</span>
-
           {workout.warning && (
             <div className="absolute top-2 right-2 bg-yellow-200 text-yellow-800 text-xs px-2 py-0.5 rounded font-semibold">
               {workout.warning}
@@ -145,119 +184,179 @@ const AddWorkoutModal = ({
   onAdd,
   loading,
   notRecommended,
+  showAlert,
+  showConfirm,
+  setShowAlert,
+  setShowConfirm,
 }) => {
-  const [duration, setDuration] = useState("30");
+  const [hours, setHours] = useState("");
+  const [minutes, setMinutes] = useState(30);
+
   if (!show || !workout) return null;
+
+  const parsedHours = parseInt(hours || "0", 10);
+  const parsedMinutes = parseInt(minutes || "0", 10);
+
+  const totalDurationMinutes = parsedHours * 60 + parsedMinutes;
 
   const estimatedCalories = profile
     ? calculateCaloriesBurned(
         workout.met_value,
         profile.weight_kg,
-        Number(duration)
+        totalDurationMinutes
       )
     : 0;
 
   const handleAdd = async () => {
-    if (!duration) return alert("Please enter duration");
-    if (notRecommended) {
-      const confirmAdd = window.confirm(
-        "⚠ This workout is not recommended for you. Do you want to continue?"
-      );
-      if (!confirmAdd) return;
+    if (totalDurationMinutes <= 0) {
+      setShowAlert("Please enter a valid duration (hours or minutes).");
+      return;
     }
-    await onAdd(workout.id, duration);
+
+    if (notRecommended) {
+      setShowConfirm(true); // show confirm modal instead of window.confirm
+      return;
+    }
+
+    await onAdd(workout.id, totalDurationMinutes);
     onClose();
+    setHours("");
+    setMinutes(30);
+  };
+
+  const handleConfirm = async () => {
+    setShowConfirm(false);
+    await onAdd(workout.id, totalDurationMinutes);
+    onClose();
+    setHours("");
+    setMinutes(30);
+  };
+
+  const handleCancelConfirm = () => {
+    setShowConfirm(false);
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="relative bg-white rounded-2xl shadow-2xl w-[320px] max-w-[90%] overflow-auto max-h-[90vh]">
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 text-red-700 hover:text-red-600 font-bold text-xl z-10"
+    <>
+      <div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+        onClick={(e) => e.target === e.currentTarget && onClose()}
+      >
+        <div
+          className="relative bg-white rounded-2xl shadow-2xl w-[320px] max-w-[90%] overflow-auto max-h-[90vh]"
+          onClick={(e) => e.stopPropagation()}
         >
-          ✕
-        </button>
+          <button
+            onClick={onClose}
+            className="absolute top-3 right-3 text-red-700 hover:text-red-600 font-bold text-xl z-10"
+          >
+            ✕
+          </button>
 
-        {workout.image_url && (
-          <div className="relative w-full h-32 rounded-lg overflow-hidden">
-            <img
-              src={workout.image_url}
-              alt={workout.name}
-              className="w-full h-full object-cover"
-            />
-            <h2 className="absolute bottom-2 left-2 text-white text-lg font-semibold bg-black bg-opacity-50 px-2 py-1 rounded">
-              {workout.name}
-            </h2>
-          </div>
-        )}
-
-        <div className="p-5 text-left">
-          {workout.description && (
-            <p className="text-gray-700 text-xs mb-2 ">{workout.description}</p>
-          )}
-
-          {workout.benefits && (
-            <div className="mb-4">
-              <h4 className="text-gray-700 font-semibold text-sm mb-2">
-                Benefits
-              </h4>
-              <p className="text-gray-600 text-xs text-left whitespace-pre-line">
-                {workout.benefits}
-              </p>
+          {workout.image_url && (
+            <div className="relative w-full h-32 rounded-lg overflow-hidden">
+              <img
+                src={workout.image_url}
+                alt={workout.name}
+                className="w-full h-full object-cover"
+              />
+              <h2 className="absolute bottom-2 left-2 text-white text-lg font-semibold bg-black bg-opacity-50 px-2 py-1 rounded">
+                {workout.name}
+              </h2>
             </div>
           )}
 
-          {workout.reference_link && (
-            <a
-              href={workout.reference_link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-green-600 text-[10px] underline mb-3 block hover:text-blue-600"
+          <div className="p-5 text-left">
+            {workout.description && (
+              <p className="text-gray-700 text-xs mb-2 ">
+                {workout.description}
+              </p>
+            )}
+            {workout.benefits && (
+              <div className="mb-4">
+                <h4 className="text-gray-700 font-semibold text-sm mb-2">
+                  Benefits
+                </h4>
+                <p className="text-gray-600 text-xs text-left whitespace-pre-line">
+                  {workout.benefits}
+                </p>
+              </div>
+            )}
+            {workout.reference_link && (
+              <a
+                href={workout.reference_link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-green-600 text-[10px] underline mb-3 block hover:text-blue-600"
+              >
+                Click to learn more about {workout.name}.
+              </a>
+            )}
+
+            <p className="text-gray-600 mb-3">
+              Enter workout duration
+            </p>
+            <div className="flex gap-2 mb-2">
+              <input
+                type="number"
+                min="0"
+                value={hours}
+                onChange={(e) => setHours(e.target.value === "" ? "" : parseInt(e.target.value, 10))}
+                className="w-1/2 p-2.5 border border-black rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-400 text-center"
+                placeholder="Hours"
+              />
+              <input
+                type="number"
+                min="0"
+                max="59"
+                value={minutes}
+                onChange={(e) => setMinutes(e.target.value === "" ? "" : parseInt(e.target.value, 10))}
+                className="w-1/2 p-2.5 border border-black rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-400 text-center"
+                placeholder="Minutes"
+              />
+            </div>
+
+            <p className="text-sm text-gray-700 mb-3">
+              Estimated Calories Burned:{" "}
+              <span className="font-semibold">{estimatedCalories} cal</span>
+            </p>
+
+            <button
+              onClick={handleAdd}
+              className="w-full py-2 rounded-xl bg-black text-white hover:bg-gray-700 active:scale-95 transition font-semibold"
             >
-              Click to learn more about {workout.name}.
-            </a>
-          )}
-
-          <p className="text-gray-600 mb-3">Enter workout duration (minutes)</p>
-          <input
-            type="number"
-            min="1"
-            value={duration}
-            onChange={(e) => setDuration(e.target.value)}
-            className="w-full p-2.5 border border-black rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-400 text-center mb-2"
-          />
-
-          <p className="text-sm text-gray-700 mb-3">
-            Estimated Calories Burned:{" "}
-            <span className="font-semibold">{estimatedCalories} cal</span>
-          </p>
-
-          <button
-            onClick={handleAdd}
-            className="w-full py-2 rounded-xl bg-black text-white hover:bg-gray-700 active:scale-95 transition font-semibold"
-          >
-            {loading ? "Adding..." : "Add Workout"}
-          </button>
+              {loading ? "Adding..." : "Add Workout"}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+
+      <AlertModal
+        show={!!showAlert}
+        message={showAlert}
+        onClose={() => setShowAlert("")}
+      />
+      <ConfirmModal
+        show={showConfirm}
+        message="⚠ This workout is not recommended for you. Do you want to continue?"
+        onConfirm={handleConfirm}
+        onCancel={handleCancelConfirm}
+      />
+    </>
   );
 };
 
 // ---------------------------
 // Main Component
 // ---------------------------
-
 export default function Workout() {
   const [userId, setUserId] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedWorkout, setSelectedWorkout] = useState(null);
   const [loading, setLoading] = useState(false);
   const [modalMessage, setModalMessage] = useState("");
+  const [showAlert, setShowAlert] = useState("");
+  const [showConfirm, setShowConfirm] = useState(false);
   const [timeOfDay, setTimeOfDay] = useState("");
 
   const navigate = useNavigate();
@@ -307,8 +406,7 @@ export default function Workout() {
     const userGoals = (profile.goal || "")
       .split(",")
       .map((g) => g.toLowerCase().trim())
-      .filter(Boolean); // remove empty strings
-
+      .filter(Boolean);
     const userHC = profile.health_conditions || [];
 
     const safeRecommended = [];
@@ -316,7 +414,6 @@ export default function Workout() {
     const notRecommended = [];
 
     workoutTypes.forEach((w) => {
-      // Check health conflicts
       const { safe: safeForHealth, conflicts: healthConflicts } = isWorkoutSafe(
         w,
         userHC
@@ -326,29 +423,18 @@ export default function Workout() {
           ? `⚠ Health conflict: ${healthConflicts.join(", ")}`
           : null;
 
-      // Check goal matching
-      let matchesGoal = true; // default true if no goals
-      if (userGoals.length > 0) {
-        matchesGoal = (w.suitable_for || []).some((suitable) =>
+      let matchesGoal =
+        userGoals.length === 0 ||
+        (w.suitable_for || []).some((suitable) =>
           userGoals.includes(suitable.toLowerCase().trim())
         );
-      }
 
-      // Decide which category
-      if (safeForHealth && matchesGoal) {
-        safeRecommended.push(w);
-      } else if (!safeForHealth && matchesGoal) {
+      if (safeForHealth && matchesGoal) safeRecommended.push(w);
+      else if (!safeForHealth && matchesGoal)
         warnedRecommended.push({ ...w, warning });
-      } else if (safeForHealth && !matchesGoal) {
-        // Safe but doesn’t match goal
-        notRecommended.push(w);
-      } else {
-        // Unsafe and doesn’t match goal
-        notRecommended.push({ ...w, warning });
-      }
+      else notRecommended.push(safeForHealth ? w : { ...w, warning });
     });
 
-    // Sort by MET descending
     safeRecommended.sort((a, b) => b.met_value - a.met_value);
     warnedRecommended.sort((a, b) => b.met_value - a.met_value);
     notRecommended.sort((a, b) => b.met_value - a.met_value);
@@ -363,7 +449,6 @@ export default function Workout() {
   // ---------------------------
   // Search filter
   // ---------------------------
-
   const filteredWorkouts = useMemo(() => {
     if (!searchQuery) return workoutTypes;
     return workoutTypes.filter((w) =>
@@ -372,7 +457,10 @@ export default function Workout() {
   }, [workoutTypes, searchQuery]);
 
   const handleAddWorkout = async (workoutId, durationMinutes) => {
-    if (!workoutId || !durationMinutes) return alert("Please fill all fields.");
+    if (!workoutId || !durationMinutes) {
+      setShowAlert("Please fill all fields.");
+      return;
+    }
     setLoading(true);
     const { error } = await supabase.from("workouts").insert([
       {
@@ -383,16 +471,18 @@ export default function Workout() {
     ]);
     setLoading(false);
 
-    if (error) return alert("Error saving workout: " + error.message);
+    if (error) {
+      setShowAlert("Error saving workout: " + error.message);
+      return;
+    }
     setModalMessage("Workout logged successfully!");
     setSelectedWorkout(null);
-    setTimeout(() => setModalMessage(""), 2000);
+    setTimeout(() => setModalMessage(""), 1000);
   };
 
   // ---------------------------
   // Render
   // ---------------------------
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-green-100 flex justify-center items-center p-4">
       <div className="bg-white w-[375px] h-[700px] rounded-3xl shadow-2xl overflow-hidden flex flex-col">
@@ -451,9 +541,7 @@ export default function Workout() {
             )}
           </div>
 
-          {/* --------------------------- */}
-          {/* Safe Recommended Workouts */}
-          {/* --------------------------- */}
+          {/* Workout lists */}
           {safeRecommendedWorkouts.length > 0 && (
             <div className="mb-6">
               <p className="font-medium text-sm mb-2 text-green-700">
@@ -485,9 +573,6 @@ export default function Workout() {
             </div>
           )}
 
-          {/* --------------------------- */}
-          {/* Recommended with Warning */}
-          {/* --------------------------- */}
           {warnedRecommendedWorkouts.length > 0 && (
             <div className="mb-6">
               <p className="font-medium text-sm mb-2 text-yellow-800">
@@ -505,7 +590,6 @@ export default function Workout() {
                     onClick={() =>
                       setSelectedWorkout({ ...w, notRecommended: true })
                     }
-                    notRecommended
                   />
                 ))}
               </div>
@@ -522,9 +606,6 @@ export default function Workout() {
             </div>
           )}
 
-          {/* --------------------------- */}
-          {/* Not Recommended Workouts */}
-          {/* --------------------------- */}
           {notRecommendedWorkouts.length > 0 && (
             <div className="mb-6">
               <p className="font-medium text-sm mb-2 text-red-600">
@@ -542,7 +623,6 @@ export default function Workout() {
                     onClick={() =>
                       setSelectedWorkout({ ...w, notRecommended: true })
                     }
-                    notRecommended
                   />
                 ))}
               </div>
@@ -560,11 +640,9 @@ export default function Workout() {
           )}
         </div>
 
-        {/* Footer */}
-
         <FooterNav />
 
-        {/* Modal */}
+        {/* Modals */}
         <AddWorkoutModal
           show={!!selectedWorkout}
           onClose={() => setSelectedWorkout(null)}
@@ -573,15 +651,18 @@ export default function Workout() {
           onAdd={handleAddWorkout}
           loading={loading}
           notRecommended={selectedWorkout?.notRecommended}
+          showAlert={showAlert}
+          showConfirm={showConfirm}
+          setShowAlert={setShowAlert}
+          setShowConfirm={setShowConfirm}
         />
 
-        {/* Success message */}
         {modalMessage && (
-          <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl p-6 shadow-lg max-w-sm text-center">
-              {modalMessage}
-            </div>
-          </div>
+          <AlertModal
+            show={!!modalMessage}
+            message={modalMessage}
+            onClose={() => setModalMessage("")}
+          />
         )}
       </div>
     </div>

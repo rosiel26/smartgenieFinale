@@ -32,13 +32,20 @@ import MealPlan from "./pages/Mealplan.jsx";
 import Workout from "./pages/Workout.jsx";
 
 function App() {
-  const { dbStatus } = useContext(DBStatusContext);
+  const { dbStatus, isLoading } = useContext(DBStatusContext);
 
   useEffect(() => {
     if (window.location.hash === "#") {
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, []);
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p>Loading...</p>
+      </div>
+    );
+  }
 
   // Nice maintenance UI
   if (dbStatus === "maintenance") {

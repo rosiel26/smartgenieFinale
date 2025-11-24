@@ -1,14 +1,7 @@
-// /utils/calculateHealth.js
-
 /**
  * Calculate BMR using Mifflin-St Jeor Equation
- * @param {number} weightKg 
- * @param {number} heightCm 
- * @param {number} age 
- * @param {"male"|"female"} gender 
- * @returns {number} BMR
  */
-const calculateBMR = (weightKg, heightCm, age, gender) => {
+export const calculateBMR = (weightKg, heightCm, age, gender) => {
   const g = gender?.toLowerCase();
   return g === "male"
     ? 10 * weightKg + 6.25 * heightCm - 5 * age + 5
@@ -17,10 +10,8 @@ const calculateBMR = (weightKg, heightCm, age, gender) => {
 
 /**
  * Get activity multiplier based on activity level
- * @param {string} level 
- * @returns {number} multiplier
  */
-const getActivityMultiplier = (level) => {
+export const getActivityMultiplier = (level) => {
   const l = level?.toLowerCase();
   return {
     sedentary: 1.2,
@@ -32,73 +23,119 @@ const getActivityMultiplier = (level) => {
 
 /**
  * Calculate BMI
- * @param {number} weightKg 
- * @param {number} heightCm 
- * @returns {number|null} BMI
  */
-const calculateBMI = (weightKg, heightCm) => {
+export const calculateBMI = (weightKg, heightCm) => {
   if (!weightKg || !heightCm) return null;
   const heightM = heightCm / 100;
-  return +(weightKg / (heightM * heightM)).toFixed(1);
+  return weightKg / (heightM * heightM);
 };
 
 /**
- * Calculate calorie goal and macros based on goals
- * @param {string[]} goalsList 
- * @param {number} tdee 
- * @returns {{calories: number, protein: number, carbs: number, fats: number}}
+ * Calculate daily calories based on goals
  */
-const calculateMacros = (goalsList, tdee) => {
+export const calculateDailyCalories = (goalsList, tdee) => {
+  const goals = (goalsList || []).map((g) => g.toLowerCase());
+
   let calorieGoal = tdee;
-  const goals = (goalsList || []).map(g => g.toLowerCase());
-
-  if (goals.includes("weight loss")) calorieGoal -= 500;
-  if (goals.includes("boost energy")) calorieGoal += 150;
-  if (goals.includes("managing stress")) calorieGoal += 100;
-  if (goals.includes("optimized athletic performance")) calorieGoal += 300;
-
-  calorieGoal = Math.max(1200, Math.round(calorieGoal));
-
-  let proteinPerc = 0.25, carbPerc = 0.5, fatPerc = 0.25;
 
   if (goals.includes("weight loss")) {
-    proteinPerc = 0.35; carbPerc = 0.4; fatPerc = 0.25;
-  }
-  if (goals.includes("boost energy") || goals.includes("optimized athletic performance")) {
-    proteinPerc = 0.3; carbPerc = 0.55; fatPerc = 0.15;
-  }
-  if (goals.includes("managing stress")) {
-    proteinPerc = 0.25; carbPerc = 0.45; fatPerc = 0.3;
-  }
-  if (goals.includes("eating a balanced diet") || goals.includes("improve physical health")) {
-    proteinPerc = 0.25; carbPerc = 0.5; fatPerc = 0.25;
+    calorieGoal -= 500; // base deficit
+    if (
+      goals.includes("boost energy") ||
+      goals.includes("managing stress") ||
+      goals.includes("optimized athletic performance")
+    ) {
+      calorieGoal += 150; // compensate slightly
+    }
+  } else {
+    if (goals.includes("boost energy")) calorieGoal += 150;
+    if (goals.includes("managing stress")) calorieGoal += 100;
+    if (goals.includes("optimized athletic performance")) calorieGoal += 300;
   }
 
-  const protein = Math.round((calorieGoal * proteinPerc) / 4);
-  const carbs = Math.round((calorieGoal * carbPerc) / 4);
-  const fats = Math.round((calorieGoal * fatPerc) / 9);
-
-  return { calories: calorieGoal, protein, carbs, fats };
+  // ❌ Remove minimum 1200 restriction
+  return calorieGoal;
 };
 
 /**
- * Full health profile calculation
- * @param {object} profile - { weightKg, heightCm, age, gender, activityLevel, goalsList }
- * @returns {object} { bmr, tdee, bmi, calories, protein, carbs, fats }
+ * Calculate daily macros with multiple goals
  */
-const calculateHealthProfile = ({ weightKg, heightCm, age, gender, activityLevel, goalsList }) => {
-  const bmr = calculateBMR(weightKg, heightCm, age, gender);
-  const tdee = Math.round(bmr * getActivityMultiplier(activityLevel));
-  const bmi = calculateBMI(weightKg, heightCm);
-  const { calories, protein, carbs, fats } = calculateMacros(goalsList, tdee);
+export const calculateDailyMacros = (goalsList, dailyCalories) => {
+  const goals = (goalsList || []).map((g) => g.toLowerCase());
 
-  return { bmr, tdee, bmi, calories, protein, carbs, fats };
+  let proteinPerc = 0.25,
+    carbPerc = 0.5,
+    fatPerc = 0.25;
+
+  if (goals.includes("weight loss")) {
+    proteinPerc = 0.35;
+    carbPerc = 0.4;
+    fatPerc = 0.25;
+  } else if (
+    goals.includes("boost energy") ||
+    goals.includes("optimized athletic performance")
+  ) {
+    proteinPerc = 0.3;
+    carbPerc = 0.55;
+    fatPerc = 0.15;
+  } else if (goals.includes("managing stress")) {
+    proteinPerc = 0.25;
+    carbPerc = 0.45;
+    fatPerc = 0.3;
+  } else if (
+    goals.includes("eating a balanced diet") ||
+    goals.includes("improve physical health")
+  ) {
+    proteinPerc = 0.25;
+    carbPerc = 0.5;
+    fatPerc = 0.25;
+  }
+
+  // ❌ Keep decimals, no rounding
+  const protein = (dailyCalories * proteinPerc) / 4;
+  const carbs = (dailyCalories * carbPerc) / 4;
+  const fats = (dailyCalories * fatPerc) / 9;
+
+  return { protein, carbs, fats };
 };
 
-export {
-  calculateBMR,
-  getActivityMultiplier,
-  calculateBMI,
-  calculateMacros,
-  calculateHealthProfile
+/**
+ * Full health profile calculation including daily & total macros
+ */
+export const calculateHealthProfile = ({
+  weightKg,
+  heightCm,
+  age,
+  gender,
+  activityLevel,
+  goalsList,
+  timeframeDays = 30,
+}) => {
+  const bmr = calculateBMR(weightKg, heightCm, age, gender);
+  const tdee = bmr * getActivityMultiplier(activityLevel);
+  const bmi = calculateBMI(weightKg, heightCm);
+
+  const dailyCalories = calculateDailyCalories(goalsList, tdee);
+  const { protein: dailyProtein, carbs: dailyCarbs, fats: dailyFats } =
+    calculateDailyMacros(goalsList, dailyCalories);
+
+  // Totals across timeframe (no rounding)
+  const totalCalories = dailyCalories * timeframeDays;
+  const totalProtein = dailyProtein * timeframeDays;
+  const totalCarbs = dailyCarbs * timeframeDays;
+  const totalFats = dailyFats * timeframeDays;
+
+  return {
+    bmr,
+    tdee,
+    bmi,
+    dailyCalories,
+    dailyProtein,
+    dailyCarbs,
+    dailyFats,
+    totalCalories,
+    totalProtein,
+    totalCarbs,
+    totalFats,
+  };
 };

@@ -1,14 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiArrowLeft } from "react-icons/fi";
-import { FaMars, FaVenus } from "react-icons/fa";
 import { motion } from "framer-motion";
 import { supabase } from "../supabaseClient";
-import {
-  calculateBMR,
-  getActivityMultiplier,
-  calculateMacros,
-} from "../utils/calculateHealth";
+import { calculateHealthProfile } from "../utils/calculateHealth";
+import { FiArrowLeft } from "react-icons/fi";
+import { FaMars, FaVenus } from "react-icons/fa";
 
 export default function CreateProfile() {
   const navigate = useNavigate();
@@ -39,87 +35,134 @@ export default function CreateProfile() {
     proteinNeeded: null,
     fatsNeeded: null,
     carbsNeeded: null,
+    totalCalories: null,
+    totalProtein: null,
+    totalFats: null,
+    totalCarbs: null,
   });
 
-  const handleInputChange = (field, value) => {
+  const handleInputChange = (field, value) =>
     setFormData((prev) => ({ ...prev, [field]: value }));
-  };
 
   const toggleArrayItem = (field, item) => {
     const currentArray = formData[field];
-    const newArray = currentArray.includes(item)
-      ? currentArray.filter((i) => i !== item)
-      : [...currentArray, item];
-    handleInputChange(field, newArray);
+    handleInputChange(
+      field,
+      currentArray.includes(item)
+        ? currentArray.filter((i) => i !== item)
+        : [...currentArray, item]
+    );
   };
 
-  const [eatingStyles] = useState([
-    {
-      name: "Balanced",
-      description: "Carbs, protein, and fats in moderation.",
-      breakdown: "Protein: 25%, Fat: 30%, Carbs: 45%",
-    },
-    {
-      name: "Keto",
-      description: "High fat, very low carb.",
-      breakdown: "Protein: 20%, Fat: 75%, Carbs: 5%",
-    },
-    {
-      name: "Low Carb",
-      description: "Less carbs, more protein and fats.",
-      breakdown: "Protein: 30%, Fat: 45%, Carbs: 25%",
-    },
-    {
-      name: "High Protein",
-      description: "Boost muscle with more protein.",
-      breakdown: "Protein: 40%, Fat: 30%, Carbs: 30%",
-    },
-  ]);
-
-  const [allergenCategories] = useState([
-    { name: "Meat", items: ["Beef", "Pork", "Chicken", "Turkey"] },
-    {
-      name: "Seafood",
-      items: ["Fish", "Shellfish", "Shrimp", "Crab", "Squid", "Lobster"],
-    },
-    { name: "Dairy", items: ["Milk", "Cheese", "Butter", "Yogurt"] },
-  ]);
-
-  const [healthOptions] = useState([
-    "Diabetes",
-    "High blood pressure",
-    "Heart disease",
-    "Kidney Disease",
-  ]);
-  const [activityOptions] = useState([
-    "Sedentary",
-    "Lightly active",
-    "Moderately active",
-    "Very active",
-  ]);
-  const [goalOptions] = useState([
+  // Options arrays
+  const goalOptions = [
     "Weight loss",
     "Improve physical health",
     "Boost energy",
     "Managing stress",
     "Optimized athletic performance",
     "Eating a balanced diet",
-  ]);
+  ];
 
-  const toggleAllergen = (item) => toggleArrayItem("selectedAllergens", item);
+  const eatingStyles = [
+    {
+      name: "Balanced",
+      description: "A mix of macronutrients for overall health.",
+      breakdown: "40% Carbs, 30% Protein, 30% Fats",
+    },
+    {
+      name: "Keto",
+      description: "High fat, adequate protein, low carb.",
+      breakdown: "5% Carbs, 25% Protein, 70% Fats",
+    },
+    {
+      name: "Low Carb",
+      description: "Reduced carbohydrate intake.",
+      breakdown: "20% Carbs, 35% Protein, 45% Fats",
+    },
+    {
+      name: "High Protein",
+      description: "Increased protein for muscle growth and satiety.",
+      breakdown: "30% Carbs, 40% Protein, 30% Fats",
+    },
+  ];
 
-  const selectAllInCategory = (categoryName) => {
-    const category = allergenCategories.find((c) => c.name === categoryName);
-    if (!category) return;
-    const allSelected = category.items.every((i) =>
-      formData.selectedAllergens.includes(i)
-    );
+  const allergenCategories = [
+    {
+      name: "Meat",
+      items: ["Chicken", "Beef", "Pork", "Liver"],
+    },
+    {
+      name: "Seafood",
+      items: ["Fish", "Shellfish", "Shrimp", "Prawns", "Mussels", "Squid"],
+    },
+    {
+      name: "Dairy",
+      items: ["Dairy", "Milk", "Condensed milk", "Cream", "Butter"],
+    },
+    {
+      name: "Legume",
+      items: ["Peanuts", "Tree nuts", "Soy", "Soy sauce", "Miso", "Tofu"],
+    },
+    {
+      name: "Grain",
+      items: ["Wheat", "Gluten", "Noodles", "Wrappers", "Breadcrumbs", "Flour"],
+    },
+    {
+      name: "Egg",
+      items: ["Egg"],
+    },
+    {
+      name: "Other",
+      items: ["Coconut", "Corn"],
+    },
+  ];
+
+  const healthOptions = [
+    "Diabetes",
+    "High Blood Pressure",
+    "Heart Disease",
+    "Kidney Disease",
+  ];
+
+  const activityOptions = [
+    "Sedentary",
+    "Lightly Active",
+    "Moderately Active",
+    "Very Active",
+  ];
+
+  // Helper functions for allergens
+  const toggleAllergen = (allergen) => {
     handleInputChange(
       "selectedAllergens",
-      allSelected
-        ? formData.selectedAllergens.filter((i) => !category.items.includes(i))
-        : [...new Set([...formData.selectedAllergens, ...category.items])]
+      formData.selectedAllergens.includes(allergen)
+        ? formData.selectedAllergens.filter((item) => item !== allergen)
+        : [...formData.selectedAllergens, allergen]
     );
+  };
+
+  const selectAllInCategory = (categoryName) => {
+    const category = allergenCategories.find((cat) => cat.name === categoryName);
+    if (!category) return;
+
+    const allSelectedInCat = category.items.every((item) =>
+      formData.selectedAllergens.includes(item)
+    );
+
+    let newSelectedAllergens;
+    if (allSelectedInCat) {
+      // Deselect all in category
+      newSelectedAllergens = formData.selectedAllergens.filter(
+        (item) => !category.items.includes(item)
+      );
+    } else {
+      // Select all in category
+      newSelectedAllergens = [
+        ...new Set([...formData.selectedAllergens, ...category.items]),
+      ];
+    }
+    handleInputChange("selectedAllergens", newSelectedAllergens);
   };
 
   const getHeightInCm = () =>
@@ -133,29 +176,31 @@ export default function CreateProfile() {
       ? parseFloat(formData.weight) || 0
       : (parseFloat(formData.weight) || 0) / 2.20462;
 
-  // ----------------- Fetch User -----------------
+  // ----------------- Fetch Current User -----------------
   useEffect(() => {
-    const checkUser = async () => {
+    const fetchUser = async () => {
       try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user) return setLoading(false);
-        setUser(user);
-        const { data: profile, error } = await supabase
+        const { data, error } = await supabase.auth.getUser();
+        if (error) throw error;
+        const currentUser = data?.user;
+        if (!currentUser) return setLoading(false);
+        setUser(currentUser);
+
+        const { data: profile, error: profileError } = await supabase
           .from("health_profiles")
           .select("*")
-          .eq("user_id", user.id)
+          .eq("user_id", currentUser.id)
           .maybeSingle();
-        if (error) console.error(error.message);
-        else if (profile) navigate("/personaldashboard", { replace: true });
+
+        if (profile) navigate("/personaldashboard", { replace: true });
+        if (profileError) console.error(profileError.message);
         setLoading(false);
       } catch (err) {
         console.error(err);
         setLoading(false);
       }
     };
-    checkUser();
+    fetchUser();
   }, [navigate]);
 
   // ----------------- Compute Age -----------------
@@ -163,44 +208,31 @@ export default function CreateProfile() {
     if (!formData.birthDate) return handleInputChange("age", null);
     const birth = new Date(formData.birthDate);
     const today = new Date();
-    let calculatedAge = today.getFullYear() - birth.getFullYear();
-    const m = today.getMonth() - birth.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birth.getDate()))
-      calculatedAge--;
-    handleInputChange("age", calculatedAge);
+    let age = today.getFullYear() - birth.getFullYear();
+    if (
+      today.getMonth() < birth.getMonth() ||
+      (today.getMonth() === birth.getMonth() &&
+        today.getDate() < birth.getDate())
+    )
+      age--;
+    handleInputChange("age", age);
   }, [formData.birthDate]);
 
-  // ----------------- Compute Health Metrics -----------------
-  useEffect(() => {
+  // ----------------- Compute Health Profile -----------------
+  const healthProfile = useMemo(() => {
     const heightCmValue = getHeightInCm();
     const weightKgValue = getWeightInKg();
-    if (!formData.age || heightCmValue <= 0 || weightKgValue <= 0) return;
+    if (!formData.age || heightCmValue <= 0 || weightKgValue <= 0) return null;
 
-    // BMI
-    const bmiValue = +(weightKgValue / (heightCmValue / 100) ** 2).toFixed(2);
-    handleInputChange("bmi", bmiValue);
-
-    // Normalize gender & activity
-    const genderNormalized = formData.gender.toLowerCase();
-    const activityNormalized = formData.activityLevel;
-
-    // BMR & TDEE
-    const bmr = calculateBMR(
-      weightKgValue,
-      heightCmValue,
-      formData.age,
-      genderNormalized
-    );
-    const tdee = bmr * getActivityMultiplier(activityNormalized);
-
-    // Ensure goals is an array
-    const goalsArray = Array.isArray(formData.goals) ? formData.goals : [];
-    const macros = calculateMacros(goalsArray, tdee);
-
-    handleInputChange("calorieNeeds", macros.calories);
-    handleInputChange("proteinNeeded", macros.protein);
-    handleInputChange("fatsNeeded", macros.fats);
-    handleInputChange("carbsNeeded", macros.carbs);
+    return calculateHealthProfile({
+      weightKg: weightKgValue,
+      heightCm: heightCmValue,
+      age: formData.age,
+      gender: formData.gender,
+      activityLevel: formData.activityLevel,
+      goalsList: formData.goals,
+      timeframeDays: formData.goalDays || 30,
+    });
   }, [
     formData.age,
     formData.heightCm,
@@ -212,7 +244,22 @@ export default function CreateProfile() {
     formData.gender,
     formData.activityLevel,
     formData.goals,
+    formData.goalDays,
   ]);
+
+  // ----------------- Update FormData with Calculated Metrics -----------------
+  useEffect(() => {
+    if (!healthProfile) return;
+    handleInputChange("bmi", healthProfile.bmi);
+    handleInputChange("calorieNeeds", healthProfile.dailyCalories);
+    handleInputChange("proteinNeeded", healthProfile.dailyProtein);
+    handleInputChange("fatsNeeded", healthProfile.dailyFats);
+    handleInputChange("carbsNeeded", healthProfile.dailyCarbs);
+    handleInputChange("totalCalories", healthProfile.totalCalories);
+    handleInputChange("totalProtein", healthProfile.totalProtein);
+    handleInputChange("totalFats", healthProfile.totalFats);
+    handleInputChange("totalCarbs", healthProfile.totalCarbs);
+  }, [healthProfile]);
 
   const isStepValid = () => {
     switch (step) {
@@ -226,57 +273,37 @@ export default function CreateProfile() {
         return formData.activityLevel !== "";
       case 9:
         return formData.heightUnit === "cm"
-          ? formData.heightCm.trim() !== ""
-          : formData.heightFt.trim() !== "" && formData.heightIn.trim() !== "";
+          ? Number(formData.heightCm) > 0
+          : Number(formData.heightFt) > 0 && Number(formData.heightIn) >= 0;
       case 10:
-        return formData.weight.trim() !== "";
+        return Number(formData.weight) > 0;
       case 11:
-        return formData.goalDays !== "";
+        return formData.goalDays > 0;
       default:
         return true;
     }
   };
 
-  const handleBack = () => (step > 1 ? setStep(step - 1) : navigate(-1));
+  const handleBack = () => {
+    if (step > 1) setStep(step - 1);
+  };
 
-  // ----------------- Handle Continue / Save -----------------
+  const handleNextStep = () => {
+    if (step < 11) setStep(step + 1);
+  };
+
   const handleContinue = async () => {
-    if (!isStepValid())
-      return step === 3
-        ? alert("You must be at least 18 years old to continue.")
-        : null;
-    if (step < 11) return setStep(step + 1);
+    if (step < 11) {
+      handleNextStep();
+      return;
+    }
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return alert("Please login first") && navigate("/login");
+    if (!user) return navigate("/login");
 
-    const heightCmValue = getHeightInCm();
-    const weightKgValue = getWeightInKg();
-    const bmiValue =
-      heightCmValue > 0 && weightKgValue > 0
-        ? +(weightKgValue / (heightCmValue / 100) ** 2).toFixed(2)
-        : null;
-    const bmr = bmiValue
-      ? calculateBMR(
-          weightKgValue,
-          heightCmValue,
-          formData.age,
-          formData.gender
-        )
-      : null;
-    const tdee = bmr
-      ? bmr * getActivityMultiplier(formData.activityLevel)
-      : null;
-    const macros = tdee ? calculateMacros(formData.goals, tdee) : {};
-
-    const roundedMacros = {
-      calories: Math.round(macros.calories),
-      protein: Math.round(macros.protein),
-      fat: Math.round(macros.fat),
-      carbs: Math.round(macros.carbs),
-    };
+    if (!healthProfile)
+      return alert(
+        "Please provide valid height, weight, age, gender, and activity."
+      );
 
     const { error } = await supabase.from("health_profiles").insert([
       {
@@ -284,8 +311,8 @@ export default function CreateProfile() {
         full_name: formData.fullName,
         birthday: formData.birthDate,
         gender: formData.gender,
-        height_cm: heightCmValue,
-        weight_kg: weightKgValue,
+        height_cm: getHeightInCm(),
+        weight_kg: getWeightInKg(),
         activity_level: formData.activityLevel,
         goal: formData.goals.join(", "),
         eating_style: formData.selectedStyle,
@@ -293,28 +320,28 @@ export default function CreateProfile() {
         allergens: formData.selectedAllergens,
         health_conditions: formData.healthConditions,
         age: formData.age,
-        bmi: bmiValue,
-        calorie_needs: roundedMacros.calories,
-        protein_needed: roundedMacros.protein,
-        fats_needed: roundedMacros.fat,
-        carbs_needed: roundedMacros.carbs,
+        bmi: Math.round(healthProfile.bmi),
+        bmr: Math.round(healthProfile.bmr),
+        tdee: Math.round(healthProfile.tdee),
+        calorie_needs: healthProfile.dailyCalories,
+        protein_needed: healthProfile.dailyProtein,
+        fats_needed: healthProfile.dailyFats,
+        carbs_needed: healthProfile.dailyCarbs,
         timeframe: formData.goalDays,
       },
     ]);
 
-    if (error) console.error("❌ Error inserting profile:", error.message);
-    else navigate("/personaldashboard");
+    if (error) {
+      console.error("❌ Error inserting profile:", error.message);
+      alert("Failed to save profile. Please try again.");
+    } else {
+      navigate("/personaldashboard");
+    }
   };
 
   if (loading)
     return (
-      <div
-        className="flex flex-col items-center justify-center min-h-screen"
-        style={{
-          background:
-            "linear-gradient(to bottom right, #ECFDF5,#ECFDF5,#D1FAE5)",
-        }}
-      >
+      <div className="flex flex-col items-center justify-center min-h-screen bg-green-50">
         <div className="border-4 border-gray-200 border-t-emerald-600 rounded-full w-12 h-12 animate-spin"></div>
         <motion.div
           initial={{ scale: 0 }}

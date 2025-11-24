@@ -7,7 +7,7 @@ import {
 } from "react-icons/fa";
 
 const NutritionProtocolDisplay = ({
-  derived,
+  dailyCalories,
   dailyProtein,
   dailyFats,
   dailyCarbs,
@@ -27,7 +27,7 @@ const NutritionProtocolDisplay = ({
             <FaFire className="text-xl mb-1 text-red-600" />
             <p className="text-sm text-gray-500 tracking-wide">Calories</p>
             <p className="text-sm font-bold text-red-700">
-              {derived.calories} kcal/day
+              {dailyCalories} kcal/day
             </p>
           </div>
 

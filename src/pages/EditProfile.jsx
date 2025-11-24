@@ -5,8 +5,93 @@ import { FiArrowLeft, FiSave } from "react-icons/fi";
 import {
   calculateBMR,
   getActivityMultiplier,
-  calculateMacros,
+  calculateDailyCalories,
+  calculateDailyMacros,
+  calculateHealthProfile,
 } from "../utils/calculateHealth";
+
+// --- Reusable components ---
+const InputField = ({
+  label,
+  name,
+  type = "text",
+  value,
+  disabled,
+  onChange,
+  min,
+}) => (
+  <div>
+    <label className="block text-sm font-semibold text-gray-700">{label}</label>
+    <input
+      type={type}
+      name={name}
+      value={value || ""}
+      min={min}
+      onChange={onChange}
+      disabled={disabled}
+      className="w-full border border-gray-300 p-2.5 rounded-lg mt-1 focus:ring-2 focus:ring-green-400 focus:border-green-400 outline-none transition disabled:bg-gray-100 disabled:text-gray-500"
+    />
+  </div>
+);
+
+const SelectField = ({ label, name, value, options, onChange }) => (
+  <div>
+    <label className="block text-sm font-semibold text-gray-700">{label}</label>
+    <select
+      name={name}
+      value={value || ""}
+      onChange={onChange}
+      className="w-full border border-gray-300 p-2.5 rounded-lg mt-1 focus:ring-2 focus:ring-green-400 focus:border-green-400 outline-none transition"
+    >
+      <option value="">Select</option>
+      {options.map((opt) => (
+        <option key={opt} value={opt}>
+          {opt}
+        </option>
+      ))}
+    </select>
+  </div>
+);
+
+const TagSelector = ({ options, selected, name, handleMultiSelect }) => {
+  const groupedOptions = options.reduce((acc, opt) => {
+    const isObject = typeof opt === "object";
+    const category = isObject ? opt.category : "";
+    if (!acc[category]) acc[category] = [];
+    acc[category].push(isObject ? opt.name : opt);
+    return acc;
+  }, {});
+
+  return (
+    <div className="space-y-2 max-h-[200px] overflow-y-auto hide-scrollbar">
+      {Object.keys(groupedOptions).map((category) => (
+        <div key={category}>
+          {category ? (
+            <p className="text-xs font-semibold text-gray-500 mb-1">
+              {category}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            {groupedOptions[category].map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => handleMultiSelect(name, value)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                  selected.includes(value)
+                    ? "bg-lime-500 text-black shadow-sm"
+                    : "bg-black text-white hover:bg-lime-400"
+                }`}
+              >
+                {value}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 export default function EditProfile() {
   const [profile, setProfile] = useState(null);
@@ -93,8 +178,8 @@ export default function EditProfile() {
         .eq("user_id", user.id)
         .single();
       if (error) console.error(error);
-      else
-        setProfile({
+      else {
+        const profileData = {
           ...data,
           health_conditions: Array.isArray(data?.health_conditions)
             ? data.health_conditions
@@ -103,14 +188,40 @@ export default function EditProfile() {
             ? data.allergens
             : data?.allergens?.split(",").map((a) => a.trim()) || [],
           goal: data?.goal ? data.goal.split(",").map((g) => g.trim()) : [],
-        });
+        };
+
+        if (profileData.birthday) {
+          const birthDate = new Date(profileData.birthday);
+          const today = new Date();
+          let age = today.getFullYear() - birthDate.getFullYear();
+          const m = today.getMonth() - birthDate.getMonth();
+          if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate()))
+            age--;
+          profileData.age = age;
+        }
+
+        setProfile(profileData);
+      }
       setLoading(false);
     })();
   }, [navigate]);
 
   // --- Handlers ---
-  const handleChange = (e) =>
-    setProfile((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setProfile((prev) => {
+      const newProfile = { ...prev, [name]: value };
+      if (name === "birthday" && value) {
+        const birthDate = new Date(value);
+        const today = new Date();
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const m = today.getMonth() - birthDate.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
+        newProfile.age = age;
+      }
+      return newProfile;
+    });
+  };
 
   const handleMultiSelect = (name, value) =>
     setProfile((prev) => {
@@ -130,6 +241,30 @@ export default function EditProfile() {
     return (profile.weight_kg / (h * h)).toFixed(1);
   }, [profile?.weight_kg, profile?.height_cm]);
 
+  // --- Memoized TDEE ---
+  const tdee = useMemo(() => {
+    if (
+      !profile?.weight_kg ||
+      !profile?.height_cm ||
+      !profile?.age ||
+      !profile?.activity_level
+    )
+      return 0;
+    const bmr = calculateBMR(
+      profile.weight_kg,
+      profile.height_cm,
+      profile.age,
+      profile.gender
+    );
+    return bmr * getActivityMultiplier(profile.activity_level);
+  }, [
+    profile?.weight_kg,
+    profile?.height_cm,
+    profile?.age,
+    profile?.gender,
+    profile?.activity_level,
+  ]);
+
   // --- Save ---
   const handleSave = async (e) => {
     e.preventDefault();
@@ -138,25 +273,50 @@ export default function EditProfile() {
     } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { gender, weight_kg, height_cm, age, activity_level, goal } = profile;
+    const {
+      goal,
+      timeframe,
+      weight_kg,
+      height_cm,
+      age,
+      gender,
+      activity_level,
+    } = profile;
+
+    // Calculate TDEE
     const bmr = calculateBMR(weight_kg, height_cm, age, gender);
     const tdee = bmr * getActivityMultiplier(activity_level);
-    const macros = calculateMacros(goal, tdee);
 
+    // Calculate daily calories & macros
+    const dailyCalories = calculateDailyCalories(goal, tdee, timeframe);
+    const {
+      protein: dailyProtein,
+      fats: dailyFats,
+      carbs: dailyCarbs,
+    } = calculateDailyMacros(goal, dailyCalories);
+
+    // Only include fields that exist in your table
     const updatedProfile = {
       ...profile,
-      goal: goal.join(","),
-      calorie_needs: Math.round(macros.calories),
-      protein_needed: Math.round(macros.protein),
-      fats_needed: Math.round(macros.fat),
-      carbs_needed: Math.round(macros.carbs),
-      bmi,
+      goal: goal.join(","), // store selected goals as comma-separated
+      calorie_needs: dailyCalories, // store as float
+      protein_needed: dailyProtein, // store as float
+      fats_needed: dailyFats, // store as float
+      carbs_needed: dailyCarbs,
+      bmi: bmi,
     };
+
+    // Remove any keys that might not exist in the table
+    delete updatedProfile.total_calories;
+    delete updatedProfile.total_protein;
+    delete updatedProfile.total_carbs;
+    delete updatedProfile.total_fats;
 
     const { error } = await supabase
       .from("health_profiles")
       .update(updatedProfile)
       .eq("user_id", user.id);
+
     if (error) console.error("Update failed:", error);
     else navigate("/personaldashboard");
   };
@@ -171,83 +331,6 @@ export default function EditProfile() {
     return (
       <div className="text-center mt-10 text-red-500">No profile found</div>
     );
-
-  // --- Reusable components ---
-  const InputField = ({ label, name, type = "text", value }) => (
-    <div>
-      <label className="block text-sm font-semibold text-gray-700">
-        {label}
-      </label>
-      <input
-        type={type}
-        name={name}
-        value={value || ""}
-        onChange={handleChange}
-        className="w-full border border-gray-300 p-2.5 rounded-lg mt-1 focus:ring-2 focus:ring-green-400 focus:border-green-400 outline-none transition"
-      />
-    </div>
-  );
-
-  const SelectField = ({ label, name, value, options }) => (
-    <div>
-      <label className="block text-sm font-semibold text-gray-700">
-        {label}
-      </label>
-      <select
-        name={name}
-        value={value || ""}
-        onChange={handleChange}
-        className="w-full border border-gray-300 p-2.5 rounded-lg mt-1 focus:ring-2 focus:ring-green-400 focus:border-green-400 outline-none transition"
-      >
-        <option value="">Select</option>
-        {options.map((opt) => (
-          <option key={opt} value={opt}>
-            {opt}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-
-  const TagSelector = ({ options, selected, name, handleMultiSelect }) => {
-    const groupedOptions = options.reduce((acc, opt) => {
-      const isObject = typeof opt === "object";
-      const category = isObject ? opt.category : "";
-      if (!acc[category]) acc[category] = [];
-      acc[category].push(isObject ? opt.name : opt);
-      return acc;
-    }, {});
-
-    return (
-      <div className="space-y-2">
-        {Object.keys(groupedOptions).map((category) => (
-          <div key={category}>
-            {category && (
-              <p className="text-xs font-semibold text-gray-500 mb-1">
-                {category}
-              </p>
-            )}
-            <div className="flex flex-wrap gap-2">
-              {groupedOptions[category].map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => handleMultiSelect(name, value)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                    selected.includes(value)
-                      ? "bg-lime-500 text-black shadow-sm"
-                      : "bg-black text-white hover:bg-green-50"
-                  }`}
-                >
-                  {value}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-100 via-white to-green-200 flex justify-center items-center px-4 py-8">
@@ -281,18 +364,22 @@ export default function EditProfile() {
             label="Full Name"
             name="full_name"
             value={profile.full_name}
+            onChange={handleChange}
           />
           <InputField
             label="Age"
             name="age"
             type="number"
-            value={profile.age}
+            value={profile.age || ""}
+            disabled
+            onChange={handleChange}
           />
           <SelectField
             label="Gender"
             name="gender"
             value={profile.gender}
             options={["Male", "Female"]}
+            onChange={handleChange}
           />
           <div className="flex gap-4">
             <InputField
@@ -300,12 +387,14 @@ export default function EditProfile() {
               name="height_cm"
               type="number"
               value={profile.height_cm}
+              onChange={handleChange}
             />
             <InputField
               label="Weight (kg)"
               name="weight_kg"
               type="number"
               value={profile.weight_kg}
+              onChange={handleChange}
             />
           </div>
           <InputField
@@ -313,24 +402,31 @@ export default function EditProfile() {
             name="birthday"
             type="date"
             value={profile.birthday}
+            onChange={handleChange}
           />
           <InputField
             label="Timeframe (days)"
             name="timeframe"
+            type="number"
+            min={1}
             value={profile.timeframe}
+            onChange={handleChange}
           />
           <SelectField
             label="Activity Level"
             name="activity_level"
             value={profile.activity_level}
             options={activityLevelOptions}
+            onChange={handleChange}
           />
           <SelectField
             label="Eating Style"
             name="eating_style"
             value={profile.eating_style}
             options={eatingStyleOptions}
+            onChange={handleChange}
           />
+
           <div className="border rounded-lg p-2">
             <label className="block text-sm font-semibold text-gray-700 mb-1">
               Goals

@@ -14,22 +14,22 @@ export default function MyStatusDisplay({
   const nutrients = [
     {
       label: "Protein",
-      consumed: Math.round(netTotals.protein),
-      goal: Math.round(totalProtein),
+      consumed: netTotals.protein,
+      goal: totalProtein,
       color: "#3B82F6",
       icon: GiChickenOven,
     },
     {
       label: "Fats",
-      consumed: Math.round(netTotals.fats),
-      goal: Math.round(totalFats),
+      consumed: netTotals.fats,
+      goal: totalFats,
       color: "#FACC15",
       icon: GiCookingPot,
     },
     {
       label: "Carbs",
-      consumed: Math.round(netTotals.carbs),
-      goal: Math.round(totalCarbs),
+      consumed: netTotals.carbs,
+      goal: totalCarbs,
       color: "#22C55E",
       icon: GiWheat,
     },
@@ -94,21 +94,21 @@ export default function MyStatusDisplay({
               ) : (
                 <span className="text-lg font-bold text-red-500 text-center">
                   ⚠️ You’ve exceeded by{" "}
-                  {Math.abs(Math.round(remainingTotals.calories))} kcal
+                  {Math.abs(remainingTotals.calories)} kcal
                 </span>
               )
             ) : (
               <>
                 <span className="text-xl font-bold text-lime-600">
-                  {Math.round(progressPercent)}%
+                  {progressPercent}%
                 </span>
                 <span className="text-gray-600 text-[10px]">
                   {remainingTotals.calories > 0
-                    ? `${Math.round(remainingTotals.calories)} kcal left`
-                    : `+${Math.abs(Math.round(remainingTotals.calories))} kcal`}
+                    ? `${remainingTotals.calories} kcal left`
+                    : `+${Math.abs(remainingTotals.calories)} kcal`}
                 </span>
                 <span className="text-gray-400 text-[10px]">
-                  of {Math.round(totalCalories)} kcal goal
+                  of {totalCalories} kcal goal
                 </span>
               </>
             )}
@@ -119,13 +119,13 @@ export default function MyStatusDisplay({
             <div>
               <p className="text-xs text-gray-500">Current</p>
               <p className="text-sm font-semibold text-lime-500">
-                {Math.round(totalCalories - remainingTotals.calories)} kcal
+                {totalCalories - remainingTotals.calories} kcal
               </p>
             </div>
             <div>
               <p className="text-xs text-gray-500">Target</p>
               <p className="text-sm font-semibold text-gray-800">
-                {Math.round(totalCalories)} kcal
+                {totalCalories} kcal
               </p>
             </div>
           </div>
@@ -137,7 +137,7 @@ export default function MyStatusDisplay({
             const percent = nutrient.goal
               ? Math.min(
                   100,
-                  Math.round((nutrient.consumed / nutrient.goal) * 100)
+                  (nutrient.consumed / nutrient.goal) * 100
                 )
               : 0;
             const Icon = nutrient.icon;

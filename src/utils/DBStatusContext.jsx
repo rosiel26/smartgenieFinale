@@ -1,33 +1,35 @@
-// utils/DBStatusContext.jsx
 import { createContext, useState, useEffect } from "react";
-import { supabase } from "../supabaseClient"; // adjust path if needed
+import { supabase } from "../supabaseClient";
 
 export const DBStatusContext = createContext();
 
 export const DBStatusProvider = ({ children }) => {
-  const [dbStatus, setDbStatus] = useState("loading"); // "ok" | "maintenance" | "loading"
+  const [dbStatus, setDbStatus] = useState(null); // null = loading
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const checkDB = async () => {
       try {
-        // Simple query to check DB
         const { error } = await supabase
           .from("health_profiles")
           .select("*")
           .limit(1);
+
         setDbStatus(error ? "maintenance" : "ok");
       } catch {
         setDbStatus("maintenance");
+      } finally {
+        setIsLoading(false); // stop loading after first check
       }
     };
 
     checkDB();
-    const interval = setInterval(checkDB, 30000); // check every 30s
+    const interval = setInterval(checkDB, 30000); // repeat every 30s
     return () => clearInterval(interval);
   }, []);
 
   return (
-    <DBStatusContext.Provider value={{ dbStatus }}>
+    <DBStatusContext.Provider value={{ dbStatus, isLoading }}>
       {children}
     </DBStatusContext.Provider>
   );

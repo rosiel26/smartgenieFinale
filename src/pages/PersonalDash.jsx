@@ -117,12 +117,12 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
               .select("calories_burned, fat_burned, carbs_burned")
               .eq("user_id", user.id),
             supabase.from("dishes").select(`
-        id, name, description, default_serving, meal_type, goal,
-        eating_style, health_condition, steps, image_url,
-        ingredients_dish_id_fkey(
-          id, name, amount, unit, calories, protein, fats, carbs, is_rice,allergen_id
-        )
-      `),
+          id, name, description, default_serving, meal_type, goal,
+          eating_style, health_condition, steps, image_url,
+          ingredients_dish_id_fkey(
+            id, name, amount, unit, calories, protein, fats, carbs, is_rice,allergen_id
+          )
+        `),
           ]);
 
         // Handle profile data
@@ -241,130 +241,6 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
     return advice;
   };
 
-  const derived = useMemo(() => {
-    if (!profile) return {};
-
-    const heightCm = Number(profile.height_cm) || 0;
-    const weightKg = Number(profile.weight_kg) || 0;
-    const age = Number(profile.age) || 25;
-    const gender = profile.gender || "female";
-    const activity = profile.activity_level || "moderate";
-
-    // ✅ Parse goals (works for array or comma-separated string)
-    let goals = [];
-    if (Array.isArray(profile.goals)) {
-      goals = profile.goals.map((g) => g.toLowerCase());
-    } else if (typeof profile.goals === "string") {
-      goals = profile.goals.split(",").map((g) => g.trim().toLowerCase());
-    }
-
-    if (!heightCm || !weightKg) return {};
-
-    // --- Step 1: BMR (Mifflin-St Jeor) ---
-    const bmr =
-      gender === "male"
-        ? 10 * weightKg + 6.25 * heightCm - 5 * age + 5
-        : 10 * weightKg + 6.25 * heightCm - 5 * age - 161;
-
-    // --- Step 2: Activity Multiplier ---
-    const activityMultipliers = {
-      sedentary: 1.2,
-      light: 1.375,
-      moderate: 1.55,
-      active: 1.725,
-      "very active": 1.9,
-    };
-    const tdee = bmr * (activityMultipliers[activity] || 1.55);
-
-    // --- Step 3: Adjust Calories Based on Goals ---
-    let calorieGoal = tdee;
-
-    if (goals.includes("weight loss")) calorieGoal -= 500;
-    if (goals.includes("boost energy")) calorieGoal += 150;
-    if (goals.includes("managing stress")) calorieGoal += 100;
-    if (goals.includes("optimized athletic performance")) calorieGoal += 300;
-
-    // “Improve physical health” & “Eating a balanced diet” = baseline (no change)
-    calorieGoal = Math.round(calorieGoal);
-
-    // --- Step 4: Macro Ratios Based on Goals ---
-    let proteinPerc = 0.25,
-      carbPerc = 0.5,
-      fatPerc = 0.25;
-
-    if (goals.includes("weight loss")) {
-      proteinPerc = 0.35;
-      carbPerc = 0.4;
-      fatPerc = 0.25;
-    }
-
-    if (
-      goals.includes("boost energy") ||
-      goals.includes("optimized athletic performance")
-    ) {
-      proteinPerc = 0.3;
-      carbPerc = 0.55;
-      fatPerc = 0.15;
-    }
-
-    if (goals.includes("managing stress")) {
-      proteinPerc = 0.25;
-      carbPerc = 0.45;
-      fatPerc = 0.3;
-    }
-
-    if (
-      goals.includes("eating a balanced diet") ||
-      goals.includes("improve physical health")
-    ) {
-      proteinPerc = 0.25;
-      carbPerc = 0.5;
-      fatPerc = 0.25;
-    }
-
-    // --- Step 5: Convert to Grams ---
-    const protein = Math.round((calorieGoal * proteinPerc) / 4);
-    const carbs = Math.round((calorieGoal * carbPerc) / 4);
-    const fats = Math.round((calorieGoal * fatPerc) / 9);
-
-    return { calories: calorieGoal, protein, carbs, fats };
-  }, [profile]);
-
-  useEffect(() => {
-    const saveCalculatedMacros = async () => {
-      if (!profile || !derived.calories) return;
-
-      // Avoid redundant writes
-      if (
-        profile.calorie_needs === derived.calories &&
-        profile.protein_needed === derived.protein &&
-        profile.fats_needed === derived.fats &&
-        profile.carbs_needed === derived.carbs
-      )
-        return;
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { error } = await supabase
-        .from("health_profiles")
-        .update({
-          calorie_needs: derived.calories,
-          protein_needed: derived.protein,
-          fats_needed: derived.fats,
-          carbs_needed: derived.carbs,
-        })
-        .eq("user_id", user.id);
-
-      if (error) console.error("❌ Error saving macros:", error.message);
-      else console.log("✅ Macros synced to database");
-    };
-
-    saveCalculatedMacros();
-  }, [derived, profile]);
-
   // -------------------- Totals (Memoized for Performance) --------------------
   const nutritionTotals = useMemo(() => {
     if (!profile) return {};
@@ -376,10 +252,10 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
     };
 
     // ✅ Use derived values as fallback
-    const dailyCalories = parseSafe(profile.calorie_needs, derived.calories);
-    const dailyFats = parseSafe(profile.fats_needed, derived.fats);
-    const dailyCarbs = parseSafe(profile.carbs_needed, derived.carbs);
-    const dailyProtein = parseSafe(profile.protein_needed, derived.protein);
+    const dailyCalories = parseSafe(profile.calorie_needs);
+    const dailyFats = parseSafe(profile.fats_needed);
+    const dailyCarbs = parseSafe(profile.carbs_needed);
+    const dailyProtein = parseSafe(profile.protein_needed);
     const timeframeDays = parseSafe(profile.timeframe, 1);
 
     // ✅ Calculate totals for the timeframe
@@ -452,7 +328,7 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
       remainingTotals: roundAll(remainingTotals),
       progressPercent,
     };
-  }, [profile, derived, mealLog, workouts]);
+  }, [profile, mealLog, workouts]);
 
   // Destructure for easier access
   const {
@@ -725,7 +601,8 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
               onClick={() => navigate("/profile")}
             >
               <span className="font-semibold text-sm text-white">
-                Hi, {profile.full_name},welcome back!
+                Hi <span className="text-lime-300">{profile.full_name} </span>
+                ,welcome!
               </span>
               <span className="text-[12px] text-white/80 mt-1">
                 <strong>BMI:</strong> {profile.bmi}
@@ -775,7 +652,7 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
               <RecentMealAndWorkoutLogs />
               {/* Nutrition Protocol */}
               <NutritionProtocolDisplay
-                derived={derived}
+                dailyCalories={dailyCalories}
                 dailyProtein={dailyProtein}
                 dailyFats={dailyFats}
                 dailyCarbs={dailyCarbs}
