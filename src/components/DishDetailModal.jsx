@@ -14,15 +14,15 @@ const DishDetailModal = ({
   storeRecommendations,
 }) => {
   const [isAdded, setIsAdded] = useState(dish.status === "added");
-  const defaultServing = dish.default_serving || 100;
   const [servingSize, setServingSize] = useState(
-    dish.servingSize || defaultServing
+    dish.servingSize !== undefined && dish.servingSize !== null
+      ? dish.servingSize
+      : 100 // Fallback to a hardcoded 100 if dish.servingSize is not provided
   );
   const [ingredients, setIngredients] = useState(
     dish.ingredients_dish_id_fkey?.map((ing) => ({
       ...ing,
-      amount: ing.amount || ing.defaultAmount || defaultServing,
-      defaultAmount: ing.defaultAmount || ing.amount || 100,
+                amount: ing.amount || ing.defaultAmount || 100,      defaultAmount: ing.defaultAmount || ing.amount || 100,
     })) || []
   );
 
@@ -34,18 +34,25 @@ const DishDetailModal = ({
   }, []);
 
   const adjustedTotals = useMemo(() => {
-    return ingredients.reduce(
-      (totals, ing) => {
+    const totals = ingredients.reduce(
+      (acc, ing) => {
         const multiplier = ing.amount / (ing.defaultAmount || 100);
         return {
-          calories: totals.calories + (ing.calories || 0) * multiplier,
-          protein: totals.protein + (ing.protein || 0) * multiplier,
-          carbs: totals.carbs + (ing.carbs || 0) * multiplier,
-          fats: totals.fats + (ing.fats || 0) * multiplier,
+          calories: acc.calories + (ing.calories || 0) * multiplier,
+          protein: acc.protein + (ing.protein || 0) * multiplier,
+          carbs: acc.carbs + (ing.carbs || 0) * multiplier,
+          fats: acc.fats + (ing.fats || 0) * multiplier,
         };
       },
       { calories: 0, protein: 0, carbs: 0, fats: 0 }
     );
+
+    return {
+      calories: parseFloat(totals.calories.toFixed(2)),
+      protein: parseFloat(totals.protein.toFixed(2)),
+      carbs: parseFloat(totals.carbs.toFixed(2)),
+      fats: parseFloat(totals.fats.toFixed(2)),
+    };
   }, [ingredients]);
 
   const isFutureMeal = useMemo(() => {
@@ -59,35 +66,52 @@ const DishDetailModal = ({
   }, [dish.meal_date]);
 
   const handleServingSizeChange = (value) => {
-    if (value === "") {
-      setServingSize("");
-      return;
-    }
-    const newServing = parseFloat(value) || defaultServing;
+    setServingSize(value); // Update display state
+
+    // Determine the numeric value for calculations
+    const newNumericServing = parseFloat(value);
+    const calculatedServingValue = (isNaN(newNumericServing) || newNumericServing < 0)
+        ? 100 // Default to 100 if empty, invalid, or negative
+        : newNumericServing;
+
+    // Retrieve the dish's default serving size (e.g., 100g)
+    const dishDefaultServing = dish.default_serving || 100;
+
     setIngredients((prev) =>
       prev.map((ing) => {
-        if (ing.is_rice) return ing;
+        // Base amount for the ingredient is its defaultAmount
+        const baseIngredientAmount = parseFloat(ing.defaultAmount) || 0;
+
+        // Calculate new amount based on the ratio of current serving to default dish serving
+        const newIngredientAmount = baseIngredientAmount * (calculatedServingValue / dishDefaultServing);
+
         return {
           ...ing,
-          amount: (ing.amount / (servingSize || defaultServing)) * newServing,
+          amount: parseFloat(newIngredientAmount.toFixed(1)),
         };
       })
     );
-    setServingSize(newServing);
   };
 
   const handleIngredientChange = (id, value) => {
-    if (value === "") {
-      setIngredients((prev) =>
-        prev.map((ing) => (ing.id === id ? { ...ing, amount: "" } : ing))
-      );
-      return;
-    }
-    const newAmount = parseFloat(value) || 0;
+    // 1. Update the state with the raw input value for display.
     setIngredients((prev) =>
-      prev.map((ing) => (ing.id === id ? { ...ing, amount: newAmount } : ing))
+      prev.map((ing) => (ing.id === id ? { ...ing, amount: value } : ing))
     );
-    onIngredientAmountChange?.(id, newAmount);
+
+    // 2. Derive the numeric value for calculations, with appropriate rounding.
+    // If value is empty or invalid, use 0 for calculations.
+    const newNumericAmount = parseFloat(value);
+    let roundedNumericAmountForCalculations;
+
+    if (isNaN(newNumericAmount) || value === "") {
+        roundedNumericAmountForCalculations = 0; // Treat empty or invalid as 0 for calculations
+    } else {
+        roundedNumericAmountForCalculations = parseFloat(newNumericAmount.toFixed(1));
+    }
+
+    // 3. Pass the rounded numeric amount to the parent handler.
+    onIngredientAmountChange?.(id, roundedNumericAmountForCalculations);
   };
 
   const mealDate = dish.meal_date
@@ -227,21 +251,19 @@ const DishDetailModal = ({
                             {ing.name}
                           </td>
                           <td className="px-2 py-2 text-right">
-                            {ing.is_rice ? (
-                              <input
-                                type="number"
-                                step="0.1"
-                                className="w-16 px-1 py-1 border rounded text-right text-xs"
-                                value={ing.amount}
-                                onChange={(e) =>
-                                  handleIngredientChange(ing.id, e.target.value)
-                                }
-                              />
-                            ) : (
-                              <span className="whitespace-nowrap">
-                                {ing.amount} {ing.unit || "g"}
-                              </span>
-                            )}
+                            {/* Always render an input field for editing, regardless of ing.is_rice */}
+                            <input
+                              type="number"
+                              step="0.1"
+                              className="w-16 px-1 py-1 border rounded text-right text-xs"
+                              value={ing.amount}
+                              onChange={(e) =>
+                                handleIngredientChange(ing.id, e.target.value)
+                              }
+                            />
+                            <span className="whitespace-nowrap">
+                               {" "}{ing.unit || "g"} {/* Display unit next to input */}
+                            </span>
                           </td>
                           <td className="px-2 py-2 text-right text-gray-600">
                             {calories}

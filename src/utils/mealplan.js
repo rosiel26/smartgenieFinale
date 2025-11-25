@@ -82,7 +82,7 @@ export const computeDishTotalsWithIngredientOverrides = (dish) => {
     const carbsPerGram =
       ing.carbsPerGram || (storedAmount > 0 ? (ing.carbs || 0) / storedAmount : 0);
     const fatsPerGram =
-      ing.fatsPerGram || (storedAmount > 0 ? (ing.fat || 0) / storedAmount : 0);
+      ing.fatsPerGram || (storedAmount > 0 ? ing.fat / storedAmount : 0);
 
     const defaultDisplayAmount = +(storedAmount * scale);
 
@@ -164,14 +164,8 @@ export const prepareDishForModal = (dish) => {
   const sumBase = rawIngredients.reduce((s, i) => s + (i.amount || i.storedAmount || 0), 0);
 
   const defaultServing = 100;
-  let amountBaseUnit = 100;
-  if (dish.default_serving) {
-    if (Math.abs(sumBase - dish.default_serving) < Math.abs(sumBase - 100)) {
-      amountBaseUnit = dish.default_serving;
-    }
-  }
-
-  if (dish.amountBaseUnit) amountBaseUnit = dish.amountBaseUnit;
+  // Determine amountBaseUnit more clearly: prioritize dish.amountBaseUnit, then dish.default_serving, then a default of 100
+  let amountBaseUnit = dish.amountBaseUnit || dish.default_serving || defaultServing;
 
   const servingSize = dish.servingSize || defaultServing;
 
@@ -182,7 +176,7 @@ export const prepareDishForModal = (dish) => {
     const totalCaloriesForStored = ing.calories || 0;
     const totalProteinForStored = ing.protein || 0;
     const totalCarbsForStored = ing.carbs || 0;
-    const totalFatsForStored = ing.fat || ing.fats || 0;
+    const totalFatsForStored = ing.fat || 0;
 
     const caloriesPerGram = storedAmount > 0 ? totalCaloriesForStored / storedAmount : 0;
     const proteinPerGram = storedAmount > 0 ? totalProteinForStored / storedAmount : 0;
@@ -193,7 +187,16 @@ export const prepareDishForModal = (dish) => {
       console.warn(`Invalid nutrition data for ingredient ${ing.name}: storedAmount=${storedAmount}`);
     }
 
-    const displayAmount = +(storedAmount * (servingSize / amountBaseUnit)).toFixed(2);
+    let effectiveAmountBaseUnit = amountBaseUnit;
+    // Heuristic: if amountBaseUnit is 1, it likely means '1 piece' or '1 serving'
+    // but servingSize and storedAmount are in grams. Assume 1 piece/serving = 100g for scaling.
+    // This addresses the 100g -> 10000g issue if amountBaseUnit was mistakenly '1'.
+    if (effectiveAmountBaseUnit === 1 && storedAmount > 0) { // Apply heuristic only if storedAmount is meaningful
+        effectiveAmountBaseUnit = 100;
+    }
+
+    const rawDisplayAmount = storedAmount * (servingSize / effectiveAmountBaseUnit);
+    const displayAmount = Number.isInteger(rawDisplayAmount) ? rawDisplayAmount : +rawDisplayAmount.toFixed(1); // Round to 1 decimal if not integer, else keep as integer
 
     const displayCalories = +(caloriesPerGram * displayAmount).toFixed(2);
     const displayProtein = +(proteinPerGram * displayAmount).toFixed(2);
@@ -218,7 +221,7 @@ export const prepareDishForModal = (dish) => {
       carbs: displayCarbs,
       fat: displayFat,
       fats: displayFat, // alias
-      customAmount: false,
+      customAmount: ingRaw.customAmount || false, // Preserve original customAmount flag
     };
   });
 
@@ -260,6 +263,37 @@ export const prepareDishForModal = (dish) => {
   };
 };
 
+const parseHealthCondition = (condition) => {
+  if (!condition) return [];
+  if (Array.isArray(condition)) {
+    return condition.map((hc) => String(hc).toLowerCase().trim());
+  }
+  if (typeof condition === "string") {
+    try {
+      let parsed = JSON.parse(condition);
+      if (Array.isArray(parsed)) {
+        return parsed.map((hc) => String(hc).toLowerCase().trim());
+      } else {
+        return [String(parsed).toLowerCase().trim()];
+      }
+    } catch {
+      // If JSON parsing fails, try to treat it as a single string or loosely parse
+      try {
+        let cleaned = condition.replace(/^\{/, "[").replace(/\}$/, "]");
+        const parsedLoose = JSON.parse(cleaned);
+        if (Array.isArray(parsedLoose)) {
+          return parsedLoose.map((hc) => String(hc).toLowerCase().trim());
+        } else {
+          return [String(parsedLoose).toLowerCase().trim()];
+        }
+      } catch {
+        return [condition.toLowerCase().trim()];
+      }
+    }
+  }
+  return []; // Fallback for unexpected types
+};
+
 export const getSuggestedDishes = (profile, dishes, searchQuery = "") => {
   if (!profile || !dishes?.length) return [];
 
@@ -298,29 +332,7 @@ export const getSuggestedDishes = (profile, dishes, searchQuery = "") => {
       ? ingredients.map((i) => i.name?.toLowerCase().trim() || "")
       : [];
 
-    let dishHealth = [];
-    if (dish.health_condition) {
-      if (Array.isArray(dish.health_condition)) {
-        dishHealth = dish.health_condition.map((hc) => hc.toLowerCase().trim());
-      } else if (typeof dish.health_condition === "string") {
-        try {
-          dishHealth = JSON.parse(dish.health_condition);
-          if (Array.isArray(dishHealth)) dishHealth = dishHealth.map((hc) => hc.toLowerCase().trim());
-          else dishHealth = [String(dishHealth).toLowerCase().trim()];
-        } catch {
-          // fallback to loose parsing
-          try {
-            let cleaned = dish.health_condition.replace(/^\{/, "[").replace(/\}$/, "]");
-            const parsed = JSON.parse(cleaned);
-            dishHealth = Array.isArray(parsed)
-              ? parsed.map((hc) => hc.toLowerCase().trim())
-              : [parsed.toLowerCase().trim()];
-          } catch {
-            dishHealth = [dish.health_condition.toLowerCase().trim()];
-          }
-        }
-      }
-    }
+    const dishHealth = parseHealthCondition(dish.health_condition);
 
     const dishGoals = Array.isArray(dish.goal) ? dish.goal.map((g) => g.toLowerCase().trim()) : [];
     const dishDietary = Array.isArray(dish.dietary) ? dish.dietary.map((d) => d.toLowerCase().trim()) : [];
@@ -354,6 +366,75 @@ export const getSuggestedDishes = (profile, dishes, searchQuery = "") => {
 
     return true;
   });
+};
+
+// Helper to calculate a recommended serving size based on user needs
+const calculateRecommendedServingSize = (
+  dish,
+  targetPerMealCalories,
+  targetPerMealProtein,
+  targetPerMealCarbs,
+  targetPerMealFats,
+  userGoal
+) => {
+  const dishNutrition = calculateDishNutrition(dish);
+  const baseAmount = dish.amountBaseUnit || 100; // Default to 100g if not specified
+
+  const caloriesPerGram = (dishNutrition.calories || 0) / baseAmount;
+  const proteinPerGram = (dishNutrition.protein || 0) / baseAmount;
+  const carbsPerGram = (dishNutrition.carbs || 0) / baseAmount;
+  const fatsPerGram = (dishNutrition.fat || 0) / baseAmount;
+
+  let suggestedServingSize = baseAmount; // Start with the dish's default/base serving
+
+  let servingSizes = [];
+
+  // Calculate serving size based on calorie needs
+  if (caloriesPerGram > 0 && targetPerMealCalories > 0) {
+    servingSizes.push(targetPerMealCalories / caloriesPerGram);
+  }
+
+  // Calculate serving size based on protein needs
+  if (proteinPerGram > 0 && targetPerMealProtein > 0) {
+    servingSizes.push(targetPerMealProtein / proteinPerGram);
+  }
+
+  // Calculate serving size based on carbs needs
+  if (carbsPerGram > 0 && targetPerMealCarbs > 0) {
+    servingSizes.push(targetPerMealCarbs / carbsPerGram);
+  }
+
+  // Calculate serving size based on fat needs
+  if (fatsPerGram > 0 && targetPerMealFats > 0) {
+    servingSizes.push(targetPerMealFats / fatsPerGram);
+  }
+
+  // Determine the final suggested serving size
+  if (servingSizes.length > 0) {
+    // Simple average for now, could be made more sophisticated
+    let averageServingSize = servingSizes.reduce((a, b) => a + b, 0) / servingSizes.length;
+    suggestedServingSize = averageServingSize;
+
+    // Prioritize protein for muscle gain or athletic goals
+    if (
+      (userGoal.includes("muscle") || userGoal.includes("athletic")) &&
+      proteinPerGram > 0 &&
+      targetPerMealProtein > 0
+    ) {
+      const proteinBasedServing = targetPerMealProtein / proteinPerGram;
+      // If protein-based serving is within a reasonable range of the average, lean towards it.
+      // Or if the current average is too low for protein needs, boost it.
+      if (proteinBasedServing > suggestedServingSize * 0.8 && proteinBasedServing < suggestedServingSize * 1.5) {
+        suggestedServingSize = proteinBasedServing;
+      } else if (proteinBasedServing > suggestedServingSize) {
+        suggestedServingSize = Math.max(suggestedServingSize, proteinBasedServing * 0.9); // Ensure minimum protein
+      }
+    }
+  }
+
+  // Clamp suggestedServingSize to a reasonable range, e.g., 30g to 700g
+  suggestedServingSize = Math.max(30, Math.min(700, suggestedServingSize));
+  return parseFloat(suggestedServingSize.toFixed(1)); // Round to one decimal place
 };
 
 // ----- BEGIN REPLACEMENT: createSmartWeeklyMealPlan -----
@@ -398,7 +479,9 @@ export const createSmartWeeklyMealPlan = (profile, dishes) => {
 
   // helpers -------------------------------------------------
   const safeScore = (val, tgt) => {
-    if (!tgt || tgt === 0) return 1;
+    if (tgt === 0) {
+      return val === 0 ? 1 : 0; // Perfect score if both are 0, else 0 if target is 0 but value is not.
+    }
     return Math.max(0, 1 - Math.abs(val - tgt) / tgt);
   };
 
@@ -487,7 +570,7 @@ export const createSmartWeeklyMealPlan = (profile, dishes) => {
     let maxFactor = 1.4;
     if (userGoal.includes("weight loss")) maxFactor = 1.25;
     else if (userGoal.includes("athletic") || userGoal.includes("muscle")) maxFactor = 1.5;
-    if (nutrition.calories > perMealCalories * maxFactor + 1) return false;
+    if (nutrition.calories > perMealCalories * maxFactor) return false; // Removed arbitrary + 1 buffer
 
     let minProtein = 0;
     if (userGoal.includes("weight loss")) minProtein = 15;
@@ -535,7 +618,8 @@ export const createSmartWeeklyMealPlan = (profile, dishes) => {
 
   const chooseCandidate = (pool, dayIndex) => {
     if (!pool?.length) return null;
-    // Try high-ranked items first but allow fallback after threshold
+
+    // First pass: strict adherence to repetition rules
     for (let i = 0; i < pool.length; i++) {
       const candidate = pool[i];
       const id = String(candidate.id);
@@ -543,10 +627,32 @@ export const createSmartWeeklyMealPlan = (profile, dishes) => {
       if (usedCount >= maxRepeatsPerWeek) continue;
       const lastUsedDay = usedHistory.lastUsedDay[id];
       if (typeof lastUsedDay === "number" && dayIndex - lastUsedDay <= minDaysBetweenSameDish) continue;
-      return candidate;
+      return candidate; // Found a perfectly valid candidate
     }
-    // fallback: if nothing found, allow reuse but try to find a similar alternative by embedding
-    return pool[0] || null;
+
+    // Second pass: Relax minDaysBetweenSameDish, but still respect maxRepeatsPerWeek
+    for (let i = 0; i < pool.length; i++) {
+      const candidate = pool[i];
+      const id = String(candidate.id);
+      const usedCount = usedHistory.counts[id] || 0;
+      if (usedCount >= maxRepeatsPerWeek) continue; // Still respect max weekly repeats
+      // This time, we skip the minDaysBetweenSameDish check
+      log("chooseCandidateRelaxedMinDays", { dayIndex, candidateId: id });
+      return candidate; // Found a candidate that only violates minDaysBetweenSameDish
+    }
+
+    // Third pass: Relax maxRepeatsPerWeek, take the best available (e.g., pool[0]), but still prefer less repetition
+    // This is the true last resort.
+    // If we reach here, it means we *must* pick a dish, even if it's very repetitive.
+    // Instead, sort the remaining pool by least used count, then score.
+    const sortedByLeastUsed = [...pool].sort((a, b) => {
+      const aUsed = usedHistory.counts[String(a.id)] || 0;
+      const bUsed = usedHistory.counts[String(b.id)] || 0;
+      if (aUsed !== bUsed) return aUsed - bUsed; // Prefer less used
+      return b._score - a._score; // Then by score
+    });
+    log("chooseCandidateRelaxedAll", { dayIndex, chosenId: sortedByLeastUsed[0]?.id });
+    return sortedByLeastUsed[0] || null;
   };
 
   // trySwapMeal improved: prefer targeted pools (highProtein) and embedding fallback
@@ -624,6 +730,18 @@ export const createSmartWeeklyMealPlan = (profile, dishes) => {
     // embedding fallback: try to find a similar dish to the current from the pool
     const similar = getSimilarDishByEmbedding(current, pool);
     if (similar && String(similar.id) !== String(current.id)) {
+      const candId = String(similar.id);
+      const candUsed = usedHistory.counts[candId] || 0;
+      if (candUsed >= maxRepeatsPerWeek) {
+        log("embeddingSwapRejectedRepetition", { dayIdx, type, candidateId: candId, reason: "maxRepeatsPerWeek" });
+        return { accepted: false }; // Cannot use similar due to max repeats
+      }
+      const last = usedHistory.lastUsedDay[candId];
+      if (typeof last === "number" && dayIdx - last <= minDaysBetweenSameDish) {
+        log("embeddingSwapRejectedRepetition", { dayIdx, type, candidateId: candId, reason: "minDaysBetweenSameDish" });
+        return { accepted: false }; // Cannot use similar due to min days between
+      }
+
       const old = dayPlan.meals[mealIndex];
       const candidate = similar;
       dayPlan.meals[mealIndex] = { type, ...candidate };
@@ -666,7 +784,18 @@ export const createSmartWeeklyMealPlan = (profile, dishes) => {
     const id = String(candidate.id);
     usedHistory.counts[id] = (usedHistory.counts[id] || 0) + 1;
     usedHistory.lastUsedDay[id] = dayIdx;
-    return { ...candidate };
+
+    // Calculate suggested serving size using the new helper function
+    const suggestedServingSize = calculateRecommendedServingSize(
+      candidate,
+      targetPerMealCalories,
+      targetPerMealProtein,
+      targetPerMealCarbs,
+      targetPerMealFats,
+      userGoal
+    );
+
+    return { ...candidate, servingSize: suggestedServingSize };
   };
 
   // Assemble pools map for selection and swapping
