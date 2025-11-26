@@ -23,6 +23,7 @@ export default function AccountManagement() {
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
 
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -50,17 +51,24 @@ export default function AccountManagement() {
 
   const checkHealthData = async (uid) => {
     try {
-      const { data: profiles } = await supabase
-        .from("health_profiles")
-        .select("id")
-        .eq("user_id", uid);
-      const { data: meals } = await supabase
-        .from("meal_logs")
-        .select("id")
-        .eq("user_id", uid);
-      setHasHealthData((profiles?.length || 0) > 0 || (meals?.length || 0) > 0);
+      const tablesToCheck = [
+        "health_profiles",
+        "meal_logs",
+        "workouts",
+        "feedback_submissions",
+        "contact_messages",
+      ];
+      
+      const promises = tablesToCheck.map((table) =>
+        supabase.from(table).select("id", { count: "exact", head: true }).eq("user_id", uid)
+      );
+
+      const results = await Promise.all(promises);
+      const hasData = results.some(res => res.count > 0);
+
+      setHasHealthData(hasData);
     } catch {
-      setHasHealthData(true);
+      setHasHealthData(true); // Assume data exists if check fails
     }
   };
 
@@ -69,23 +77,30 @@ export default function AccountManagement() {
     setLoading(true);
     setErrorText("");
     try {
-      const { error: e1 } = await supabase
-        .from("health_profiles")
-        .delete()
-        .eq("user_id", userId);
-      const { error: e2 } = await supabase
-        .from("meal_logs")
-        .delete()
-        .eq("user_id", userId);
-      const { error: e3 } = await supabase
-        .from("workouts")
-        .delete()
-        .eq("user_id", userId);
+      const tablesToClear = [
+        "health_profiles",
+        "meal_logs",
+        "workouts",
+        "feedback_submissions",
+        "contact_messages",
+      ];
 
-      if (e1 || e2) throw new Error("Failed to clear some data.");
+      const promises = tablesToClear.map((table) =>
+        supabase.from(table).delete().eq("user_id", userId)
+      );
+
+      const results = await Promise.all(promises);
+      const errors = results.map((res) => res.error).filter(Boolean);
+
+      if (errors.length > 0) {
+        // Log individual errors for debugging
+        errors.forEach(error => console.error("Deletion error:", error));
+        throw new Error("Failed to clear some data. Check console for details.");
+      }
 
       setHasHealthData(false);
       setShowClearModal(false);
+      setSuccessMessage("✅ Health data cleared successfully!");
       setShowSuccessToast(true);
       setTimeout(() => setShowSuccessToast(false), 2500);
     } catch (err) {
@@ -113,7 +128,7 @@ export default function AccountManagement() {
       if (!session)
         throw new Error("You must be logged in to delete your account.");
 
-      console.log("Attempting to delete user with ID:", userId);
+      // console.log("Attempting to delete user with ID:", userId);
 
       const response = await fetch(
         "https://exscmqdazkrtrfhstytk.supabase.co/functions/v1/delete-user",
@@ -136,11 +151,14 @@ export default function AccountManagement() {
       if (data.success) {
         // Successfully deleted account
         setShowDeleteModal(false);
-        alert("✅ Your account has been successfully deleted.");
+        setSuccessMessage("✅ Your account has been successfully deleted.");
+        setShowSuccessToast(true);
 
-        // Sign out and navigate to login
-        await supabase.auth.signOut();
-        navigate("/login");
+        // Sign out and navigate to login after a delay
+        setTimeout(async () => {
+          await supabase.auth.signOut();
+          navigate("/login");
+        }, 2500);
       } else {
         throw new Error(data.error || "Failed to delete account.");
       }
@@ -181,7 +199,9 @@ export default function AccountManagement() {
       setShowChangePasswordModal(false);
       setNewPassword("");
       setConfirmPassword("");
-      alert("✅ Password updated successfully!");
+      setSuccessMessage("✅ Password updated successfully!");
+      setShowSuccessToast(true);
+      setTimeout(() => setShowSuccessToast(false), 2500);
     } finally {
       setLoading(false);
     }
@@ -443,7 +463,7 @@ export default function AccountManagement() {
             className="fixed inset-0 flex items-center justify-center z-50"
           >
             <div className="bg-green-600 text-white px-6 py-3 rounded-xl shadow-lg text-center">
-              ✅ Health data cleared successfully!
+              {successMessage}
             </div>
           </motion.div>
         )}
