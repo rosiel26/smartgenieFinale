@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import Navbar from "../components/NavBar";
@@ -13,7 +13,11 @@ import {
 
 function LandingPage() {
   const navigate = useNavigate();
-  const isDesktopDevice = isDesktop();
+  const [isDesktopDevice, setIsDesktopDevice] = useState(true);
+
+  useEffect(() => {
+    setIsDesktopDevice(isDesktop());
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
