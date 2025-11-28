@@ -65,3 +65,12 @@ export const computeDishTotalsWithIngredientOverrides = (dish) => {
     fats: +(scaledFats + deltaFats).toFixed(2),
   };
 };
+
+export const isDesktop = () => {
+  if (typeof navigator === "undefined") {
+    return true; // Assume desktop for SSR or non-browser environments
+  }
+  return !/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  );
+};
