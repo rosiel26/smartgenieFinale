@@ -685,7 +685,7 @@ export default function CreateProfile() {
                 Do you have any health conditions?
               </h2>
               <p className="mt-2 text-gray-600 text-sm max-w-md mx-auto">
-                  (You can select multiple allergens)
+                  (You can select multiple health condition)
               </p>
               <div className="flex flex-col gap-2 w-full">
                 {healthOptions.map((cond) => (
