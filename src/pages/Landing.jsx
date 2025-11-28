@@ -2,6 +2,7 @@ import React, { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import Navbar from "../components/NavBar";
+import { isDesktop } from "../utils/utils";
 import {
   FiCamera,
   FiUpload,
@@ -12,6 +13,7 @@ import {
 
 function LandingPage() {
   const navigate = useNavigate();
+  const isDesktopDevice = isDesktop();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -87,14 +89,28 @@ function LandingPage() {
             {/* Capture with camera */}
             <label
               htmlFor="cameraUpload"
-              className="flex flex-col justify-center items-center border-2 border-dashed border-blue-400 rounded-xl w-64 h-48 cursor-pointer hover:bg-blue-50 transition"
+              className={`flex flex-col justify-center items-center border-2 border-dashed rounded-xl w-64 h-48 transition ${
+                isDesktopDevice
+                  ? "border-gray-300 bg-gray-100 cursor-not-allowed"
+                  : "border-blue-400 hover:bg-blue-50 cursor-pointer"
+              }`}
             >
-              <FiCamera className="text-blue-500 text-3xl mb-2" />
+              <FiCamera
+                className={`text-3xl mb-2 ${
+                  isDesktopDevice ? "text-gray-400" : "text-blue-500"
+                }`}
+              />
               <p className="text-md font-semibold text-gray-800">
                 Capture with Camera
               </p>
-              <p className="text-sm text-gray-500 mt-1">
-                Use your phone's camera
+              <p
+                className={`text-sm mt-1 ${
+                  isDesktopDevice ? "text-gray-500" : "text-gray-500"
+                }`}
+              >
+                {isDesktopDevice
+                  ? "Available on mobile"
+                  : "Use your phone's camera"}
               </p>
               <input
                 id="cameraUpload"
@@ -103,6 +119,7 @@ function LandingPage() {
                 capture="environment"
                 className="hidden"
                 onChange={handleFileUpload}
+                disabled={isDesktopDevice}
               />
             </label>
           </div>
