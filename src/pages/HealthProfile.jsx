@@ -46,12 +46,19 @@ export default function CreateProfile() {
 
   const toggleArrayItem = (field, item) => {
     const currentArray = formData[field];
-    handleInputChange(
-      field,
-      currentArray.includes(item)
-        ? currentArray.filter((i) => i !== item)
-        : [...currentArray, item]
-    );
+    let newArray;
+
+    if (item === "None") {
+      newArray = currentArray.includes("None") ? [] : ["None"];
+    } else {
+      const filteredArray = currentArray.filter((i) => i !== "None");
+      if (filteredArray.includes(item)) {
+        newArray = filteredArray.filter((i) => i !== item);
+      } else {
+        newArray = [...filteredArray, item];
+      }
+    }
+    handleInputChange(field, newArray);
   };
 
   // Options arrays
@@ -62,6 +69,7 @@ export default function CreateProfile() {
     "Managing stress",
     "Optimized athletic performance",
     "Eating a balanced diet",
+    "None",
   ];
 
   const eatingStyles = [
@@ -84,6 +92,11 @@ export default function CreateProfile() {
       name: "High Protein",
       description: "Increased protein for muscle growth and satiety.",
       breakdown: "30% Carbs, 40% Protein, 30% Fats",
+    },
+    {
+      name: "None",
+      description: "No specific eating style preference.",
+      breakdown: "",
     },
   ];
 
@@ -123,6 +136,7 @@ export default function CreateProfile() {
     "High Blood Pressure",
     "Heart Disease",
     "Kidney Disease",
+    "None",
   ];
 
   const activityOptions = [
@@ -134,16 +148,26 @@ export default function CreateProfile() {
 
   // Helper functions for allergens
   const toggleAllergen = (allergen) => {
-    handleInputChange(
-      "selectedAllergens",
-      formData.selectedAllergens.includes(allergen)
-        ? formData.selectedAllergens.filter((item) => item !== allergen)
-        : [...formData.selectedAllergens, allergen]
-    );
+    const currentArray = formData.selectedAllergens;
+    let newArray;
+
+    if (allergen === "None") {
+      newArray = currentArray.includes("None") ? [] : ["None"];
+    } else {
+      const filteredArray = currentArray.filter((i) => i !== "None");
+      if (filteredArray.includes(allergen)) {
+        newArray = filteredArray.filter((i) => i !== allergen);
+      } else {
+        newArray = [...filteredArray, allergen];
+      }
+    }
+    handleInputChange("selectedAllergens", newArray);
   };
 
   const selectAllInCategory = (categoryName) => {
-    const category = allergenCategories.find((cat) => cat.name === categoryName);
+    const category = allergenCategories.find(
+      (cat) => cat.name === categoryName
+    );
     if (!category) return;
 
     const allSelectedInCat = category.items.every((item) =>
@@ -158,8 +182,11 @@ export default function CreateProfile() {
       );
     } else {
       // Select all in category
+      const filteredAllergens = formData.selectedAllergens.filter(
+        (i) => i !== "None"
+      );
       newSelectedAllergens = [
-        ...new Set([...formData.selectedAllergens, ...category.items]),
+        ...new Set([...filteredAllergens, ...category.items]),
       ];
     }
     handleInputChange("selectedAllergens", newSelectedAllergens);
@@ -569,6 +596,16 @@ export default function CreateProfile() {
 
               {/* Allergens List */}
               <div className="flex flex-col gap-6 w-full max-h-[350px] overflow-y-auto mt-6 pr-2 scrollbar-hide">
+                <div
+                  onClick={() => toggleAllergen("None")}
+                  className={`p-4 rounded-xl cursor-pointer border ${
+                    formData.selectedAllergens.includes("None")
+                      ? "bg-emerald-600 text-white border-emerald-600"
+                      : "bg-white border-gray-200 hover:bg-emerald-100"
+                  }`}
+                >
+                  None
+                </div>
                 {allergenCategories.map((cat) => (
                   <div
                     key={cat.name}
@@ -776,8 +813,9 @@ export default function CreateProfile() {
               <p className="text-gray-600 text-sm text-center mb-4">
                 Enter your desired timeframe.
               </p>
-              <div className="flex items-center justify-center gap-4">
-                <label className="font-medium">Timeframe (days):</label>
+              <div className="flex flex-col items-center justify-center gap-3">
+                <label className="font-medium text-lg">Timeframe (days):</label>
+
                 <input
                   type="number"
                   min={1}
@@ -790,7 +828,7 @@ export default function CreateProfile() {
                       handleInputChange("goalDays", Number(value));
                     }
                   }}
-                  className="border rounded-lg px-2 py-1 w-20"
+                  className="border rounded-lg px-3 py-2 w-28 text-center focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
             </>
