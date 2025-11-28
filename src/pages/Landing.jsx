@@ -59,29 +59,48 @@ function LandingPage() {
           </h2>
 
           <p className="text-gray-600 mb-8">
-            Upload/capture a photo of any dish to see the magic happen
+            Upload or capture a photo of any dish to see the magic happen
           </p>
 
           <div className="flex flex-col md:flex-row gap-6 justify-center items-center">
-            {/* Upload from gallery or camera */}
+            {/* Upload from gallery */}
             <label
               htmlFor="fileUpload"
               className="flex flex-col justify-center items-center border-2 border-dashed border-green-400 rounded-xl w-64 h-48 cursor-pointer hover:bg-green-50 transition"
             >
               <FiUpload className="text-green-500 text-3xl mb-2" />
               <p className="text-md font-semibold text-gray-800">
-                Click to upload
+                Upload from Gallery
               </p>
               <p className="text-sm text-gray-500 mt-1">
-                or take a photo with camera
+                Select a photo from your device
               </p>
-
-              {/* ✅ accept both gallery + camera */}
               <input
                 id="fileUpload"
                 type="file"
                 accept="image/*"
-                capture="environment" // ← this triggers camera on mobile
+                className="hidden"
+                onChange={handleFileUpload}
+              />
+            </label>
+
+            {/* Capture with camera */}
+            <label
+              htmlFor="cameraUpload"
+              className="flex flex-col justify-center items-center border-2 border-dashed border-blue-400 rounded-xl w-64 h-48 cursor-pointer hover:bg-blue-50 transition"
+            >
+              <FiCamera className="text-blue-500 text-3xl mb-2" />
+              <p className="text-md font-semibold text-gray-800">
+                Capture with Camera
+              </p>
+              <p className="text-sm text-gray-500 mt-1">
+                Use your phone's camera
+              </p>
+              <input
+                id="cameraUpload"
+                type="file"
+                accept="image/*"
+                capture="environment"
                 className="hidden"
                 onChange={handleFileUpload}
               />
