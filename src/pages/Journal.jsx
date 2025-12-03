@@ -1,0 +1,373 @@
+import React, { useEffect, useState, useMemo, useCallback } from "react";
+import { supabase } from "../supabaseClient";
+import { useNavigate } from "react-router-dom";
+import { FiCalendar } from "react-icons/fi";
+import FooterNav from "../components/FooterNav";
+import MealAndWorkoutLogs from "../components/MealAndWorkoutLogs";
+
+// Helpers
+const getLocalDateString = (date) => {
+  const d = date instanceof Date ? date : new Date(date);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+    .toISOString()
+    .split("T")[0];
+};
+
+const getWeekDays = (date) => {
+  const start = new Date(date);
+  start.setDate(start.getDate() - start.getDay());
+  return [...Array(7)].map((_, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    return d;
+  });
+};
+
+export default function Journal() {
+  const navigate = useNavigate();
+  const [profile, setProfile] = useState(null);
+  const [mealLog, setMealLog] = useState([]);
+  const [workoutLog, setWorkoutLog] = useState([]);
+  const [selectedDay, setSelectedDay] = useState(new Date());
+  const [mealTypeFilter, setMealTypeFilter] = useState("");
+  const ITEMS_PER_PAGE = 6;
+  const [logPage, setLogPage] = useState(0);
+
+  // Fetch data
+  const fetchData = useCallback(async () => {
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
+    if (userErr || !user) return navigate("/login");
+
+    try {
+      const [profileRes, mealRes, workoutRes] = await Promise.all([
+        supabase
+          .from("health_profiles")
+          .select("calorie_needs, protein_needed, fats_needed, carbs_needed")
+          .eq("user_id", user.id)
+          .single(),
+        supabase
+          .from("meal_logs")
+          .select(
+            "id, meal_type, calories, protein, fat, carbs, meal_date, dish_name, serving_label"
+          )
+          .eq("user_id", user.id)
+          .order("meal_date", { ascending: true }),
+        supabase
+          .from("workouts")
+          .select(
+            "id, duration, calories_burned, fat_burned, carbs_burned, created_at, workout_types!inner(name)"
+          )
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: true }),
+      ]);
+
+      setProfile(profileRes.data ?? null);
+      setMealLog(mealRes.data ?? []);
+      setWorkoutLog(workoutRes.data ?? []);
+    } catch (err) {
+      console.error("Data fetch failed:", err);
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Filtered logs
+  const filteredMealLogs = useMemo(() => {
+    const dayStr = getLocalDateString(selectedDay);
+    return mealLog.filter(
+      (m) =>
+        getLocalDateString(m.meal_date) === dayStr &&
+        (!mealTypeFilter || m.meal_type === mealTypeFilter)
+    );
+  }, [mealLog, selectedDay, mealTypeFilter]);
+
+  const filteredWorkoutLogs = useMemo(() => {
+    const dayStr = getLocalDateString(selectedDay);
+    return workoutLog.filter(
+      (w) => getLocalDateString(w.created_at) === dayStr
+    );
+  }, [workoutLog, selectedDay]);
+
+  // Totals
+  const totalsMeals = useMemo(
+    () =>
+      filteredMealLogs.reduce(
+        (a, m) => ({
+          calories: a.calories + (m.calories || 0),
+          protein: a.protein + (m.protein || 0),
+          fat: a.fat + (m.fat || 0),
+          carbs: a.carbs + (m.carbs || 0),
+        }),
+        { calories: 0, protein: 0, fat: 0, carbs: 0 }
+      ),
+    [filteredMealLogs]
+  );
+
+  const totalsWorkout = useMemo(
+    () =>
+      filteredWorkoutLogs.reduce(
+        (a, w) => ({
+          calories: a.calories + (w.calories_burned || 0),
+          fat: a.fat + (w.fat_burned || 0),
+          carbs: a.carbs + (w.carbs_burned || 0),
+          duration: a.duration + (w.duration || 0),
+        }),
+        { calories: 0, fat: 0, carbs: 0, duration: 0 }
+      ),
+    [filteredWorkoutLogs]
+  );
+
+  const [deleteConfirm, setDeleteConfirm] = useState({ show: false, type: null, id: null });
+
+  // Delete handlers
+  const handleDeleteMeal = async (id) => {
+    const { error } = await supabase.from("meal_logs").delete().eq("id", id);
+    if (!error) setMealLog((prev) => prev.filter((m) => m.id !== id));
+    setDeleteConfirm({ show: false, type: null, id: null });
+  };
+
+  const handleDeleteWorkout = async (id) => {
+    const { error } = await supabase.from("workouts").delete().eq("id", id);
+    if (!error) setWorkoutLog((prev) => prev.filter((w) => w.id !== id));
+    setDeleteConfirm({ show: false, type: null, id: null });
+  };
+
+  const confirmDelete = () => {
+    if (deleteConfirm.type === "meal") {
+      handleDeleteMeal(deleteConfirm.id);
+    } else if (deleteConfirm.type === "workout") {
+      handleDeleteWorkout(deleteConfirm.id);
+    }
+  };
+
+  // Pagination
+  const paginatedMealLogs = filteredMealLogs.slice(
+    logPage * ITEMS_PER_PAGE,
+    logPage * ITEMS_PER_PAGE + ITEMS_PER_PAGE
+  );
+
+  const paginatedWorkoutLogs = filteredWorkoutLogs.slice(
+    logPage * ITEMS_PER_PAGE,
+    logPage * ITEMS_PER_PAGE + ITEMS_PER_PAGE
+  );
+
+  return (
+    <div className="min-h-screen bg-green-50 flex items-center justify-center px-4 py-6">
+      <div className="bg-white w-[375px] h-[700px] rounded-2xl shadow-2xl flex flex-col overflow-hidden relative">
+        {/* Header */}
+
+        <div className="rounded-t-2xl px-5 pt-6 pb-4 shadow-lg">
+          <div className="text-right text-black font-semibold text-sm mb-3">
+            {selectedDay.toLocaleDateString("en-US", {
+              month: "long",
+              year: "numeric",
+            })}
+          </div>
+
+          <div className="flex justify-between gap-1 overflow-x-auto pb-1">
+            {getWeekDays(selectedDay).map((d) => {
+              const isSel =
+                getLocalDateString(d) === getLocalDateString(selectedDay);
+              return (
+                <button
+                  key={d}
+                  onClick={() => setSelectedDay(d)}
+                  className={`flex flex-col items-center min-w-[40px] py-2 px-1 rounded-xl text-xs transition ${
+                    isSel
+                      ? "bg-black text-lime-500 font-bold shadow-md"
+                      : "text-black hover:bg-lime-100"
+                  }`}
+                >
+                  <span className="text-[10px]">
+                    {d.toLocaleDateString("en-US", { weekday: "short" })}
+                  </span>
+                  <span className="mt-1 text-sm">{d.getDate()}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex gap-2 mt-2">
+            <input
+              type="date"
+              value={getLocalDateString(selectedDay)}
+              onChange={(e) => setSelectedDay(new Date(e.target.value))}
+              className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm shadow-inner"
+            />
+            <select
+              className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm shadow-inner"
+              value={mealTypeFilter}
+              onChange={(e) => setMealTypeFilter(e.target.value)}
+            >
+              <option value="">All Meals</option>
+              <option>Breakfast</option>
+              <option>Lunch</option>
+              <option>Dinner</option>
+              <option>Snack</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Scrollable content area */}
+        <div className="p-4 flex-1 space-y-5 overflow-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          {/* Filters */}
+
+          <div className="grid grid-cols-2 gap-4 w-full max-w-4xl mx-auto">
+            {/* Calories Consumed Half-Moon */}
+            {/* Calories Consumed Half-Moon (affected by meals & workouts) */}
+            {/* Calories Half-Moon with Congrats & Exceed */}
+            <div className="bg-black p-4 rounded-xl shadow-lg flex flex-col items-center">
+              <h3 className="text-white font-semibold mb-2 text-sm">
+                Calories
+              </h3>
+
+              <div className="relative w-40 h-20">
+                <svg className="w-40 h-20" viewBox="0 0 100 50">
+                  {/* Background semicircle */}
+                  <path
+                    d="M 10 50 A 40 40 0 0 1 90 50"
+                    fill="none"
+                    stroke="#374151"
+                    strokeWidth="10"
+                    strokeLinecap="round"
+                  />
+                  {/* Progress semicircle */}
+                  <path
+                    d="M 10 50 A 40 40 0 0 1 90 50"
+                    fill="none"
+                    stroke="yellow"
+                    strokeWidth="10"
+                    strokeDasharray={125.6} // circumference of half circle
+                    strokeDashoffset={
+                      125.6 -
+                      (125.6 *
+                        Math.min(
+                          totalsMeals.calories + totalsWorkout.calories,
+                          profile?.calorie_needs ?? 1
+                        )) /
+                        (profile?.calorie_needs ?? 1)
+                    }
+                    style={{ transition: "stroke-dashoffset 0.5s ease" }}
+                  />
+                </svg>
+              </div>
+
+              {/* Consumed / Target */}
+              <div className="flex justify-between w-40 mt-1 text-white text-xs font-semibold px-2">
+                <span>
+                  {(totalsMeals.calories + totalsWorkout.calories).toFixed(0)}
+                </span>
+                <span>{(profile?.calorie_needs ?? 0).toFixed(0)}</span>
+              </div>
+
+              {/* Status message */}
+              {totalsMeals.calories + totalsWorkout.calories >=
+              (profile?.calorie_needs ?? 0) ? (
+                <span className="font-semibold text-lime-500 text-center mt-2 text-xs">
+                  Congrats!{" "}
+                  {(
+                    totalsMeals.calories +
+                    totalsWorkout.calories -
+                    (profile?.calorie_needs ?? 0)
+                  ).toFixed(0)}{" "}
+                  kcal over for today!
+                </span>
+              ) : (
+                <span className="font-semibold text-lime-500 text-center mt-2 text-xs">
+                  {(totalsMeals.calories + totalsWorkout.calories).toFixed(0)}{" "}
+                  kcal counted toward {(profile?.calorie_needs ?? 0).toFixed(0)}{" "}
+                  kcal daily goal
+                </span>
+              )}
+            </div>
+
+            {/* Workout Summary Main Card */}
+            <div className="bg-black p-4 rounded-xl shadow-lg">
+              <h3 className="text-lime-500 font-semibold mb-2 text-sm">
+                Workout Summary
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                {/* Calories */}
+                <div className="bg-gray-800 p-3 rounded-lg text-white text-xs flex flex-col items-center justify-center">
+                  <span className="font-medium">Calories</span>
+                  <span className="font-semibold text-lime-500">
+                    {(totalsWorkout.calories ?? 0).toFixed(0)} kcal
+                  </span>
+                </div>
+
+                {/* Fat */}
+                <div className="bg-gray-800 p-3 rounded-lg text-white text-xs flex flex-col items-center justify-center">
+                  <span className="font-medium">Fat</span>
+                  <span className="font-semibold text-yellow-400">
+                    {(totalsWorkout.fat ?? 0).toFixed(1)} g
+                  </span>
+                </div>
+
+                {/* Carbs */}
+                <div className="bg-gray-800 p-3 rounded-lg text-white text-xs flex flex-col items-center justify-center">
+                  <span className="font-medium">Carbs</span>
+                  <span className="font-semibold text-blue-400">
+                    {(totalsWorkout.carbs ?? 0).toFixed(1)} g
+                  </span>
+                </div>
+
+                {/* Duration */}
+                <div className="bg-gray-800 p-3 rounded-lg text-white text-xs flex flex-col items-center justify-center">
+                  <span className="font-medium">Duration</span>
+                  <span className="font-semibold text-pink-500">
+                    {(totalsWorkout.duration ?? 0).toFixed(0)} min
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Logs */}
+          <MealAndWorkoutLogs
+            mealLogs={paginatedMealLogs}
+            workoutLogs={paginatedWorkoutLogs}
+            onDeleteMeal={(id) => setDeleteConfirm({ show: true, type: "meal", id })}
+            onDeleteWorkout={(id) => setDeleteConfirm({ show: true, type: "workout", id })}
+          />
+        </div>
+
+        {/* Fixed Footer */}
+        <div className="absolute bottom-0 left-0 w-full">
+          <FooterNav />
+        </div>
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm.show && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 shadow-lg max-w-sm w-full text-center">
+            <h2 className="text-lg font-semibold text-red-600 mb-3">
+              Confirm Delete
+            </h2>
+            <p className="text-gray-600 mb-5">
+              Are you sure you want to delete this {deleteConfirm.type}?
+            </p>
+            <div className="flex justify-center gap-3">
+              <button
+                onClick={() => setDeleteConfirm({ show: false, type: null, id: null })}
+                className="bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,15 @@
+INSERT INTO public.bohol_cities (id, name) 
+VALUES 
+    ('bienunido', 'Bien Unido'),
+    ('carmen', 'Carmen'),
+    ('dauis', 'Dauis'),
+    ('inabanga', 'Inabanga'),
+    ('jagna', 'Jagna'),
+    ('loon', 'Loon'),
+    ('panglao', 'Panglao'),
+    ('tagbilaran', 'Tagbilaran City'),
+    ('talibon', 'Talibon'),
+    ('trinidad', 'Trinidad'),
+    ('tubigon', 'Tubigon'),
+    ('ubay', 'Ubay')
+ON CONFLICT (id) DO NOTHING;
