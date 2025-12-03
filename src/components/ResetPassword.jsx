@@ -10,20 +10,58 @@ export default function ResetPassword() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [message, setMessage] = useState({ text: "", type: "" });
   const [loading, setLoading] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
   const navigate = useNavigate();
 
   const searchParams = new URLSearchParams(window.location.search);
   const accessToken = searchParams.get("access_token");
+  const type = searchParams.get("type");
 
   useEffect(() => {
-    if (!accessToken) {
-      setMessage({ text: "Reset link expired or invalid.", type: "error" });
-    }
-  }, [accessToken]);
+    const verifyToken = async () => {
+      if (!accessToken || type !== "recovery") {
+        setMessage({ text: "Reset link expired or invalid.", type: "error" });
+        return;
+      }
+
+      try {
+        // Verify the recovery token from the email link
+        const { data, error } = await supabase.auth.verifyOtp({
+          token: accessToken,
+          type: "recovery",
+        });
+
+        if (error) {
+          console.error("Token verification error:", error);
+          setMessage({ text: "Reset link expired or invalid.", type: "error" });
+        } else if (data?.session) {
+          // Token is valid and we have a session
+          setIsVerified(true);
+          setMessage({ text: "", type: "" });
+        }
+      } catch (err) {
+        console.error("Verification exception:", err);
+        setMessage({
+          text: "Reset link is invalid or expired.",
+          type: "error",
+        });
+      }
+    };
+
+    verifyToken();
+  }, [accessToken, type]);
 
   const handleReset = async (e) => {
     e.preventDefault();
     setMessage({ text: "", type: "" });
+
+    if (!isVerified) {
+      setMessage({
+        text: "Please verify your reset link first.",
+        type: "error",
+      });
+      return;
+    }
 
     if (!password || !confirmPassword) {
       setMessage({ text: "Please fill in all fields.", type: "error" });
@@ -44,26 +82,39 @@ export default function ResetPassword() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.updateUser(
-        { password },
-        { accessToken }
-      );
+      // Update password with the verified session
+      const { error } = await supabase.auth.updateUser({ password });
 
       if (error) {
+        console.error("Password update error:", error);
         setMessage({ text: error.message, type: "error" });
       } else {
         setMessage({
-          text: "✅ Password successfully updated! Redirecting...",
+          text: "✅ Password successfully updated! Redirecting to login...",
           type: "success",
         });
         setTimeout(() => navigate("/login"), 2000);
       }
-    } catch {
+    } catch (err) {
+      console.error("Password reset exception:", err);
       setMessage({ text: "Something went wrong. Try again.", type: "error" });
     }
 
     setLoading(false);
   };
+
+  if (!isVerified && !message.text) {
+    return (
+      <div style={container}>
+        <div style={card}>
+          <h2 style={title}>Verifying Reset Link...</h2>
+          <p style={{ color: "#666", marginTop: "20px" }}>
+            Please wait while we verify your reset link.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={container}>
@@ -83,45 +134,60 @@ export default function ResetPassword() {
           </div>
         )}
 
-        <form onSubmit={handleReset} style={form}>
-          {/* New Password */}
-          <div style={inputContainer}>
-            <input
-              type={showPassword ? "text" : "password"}
-              placeholder="New Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={input}
-            />
-            <span
-              onClick={() => setShowPassword((prev) => !prev)}
-              style={eyeIcon}
-            >
-              {showPassword ? <FiEyeOff /> : <FiEye />}
-            </span>
-          </div>
+        {isVerified && !message.text ? (
+          <form onSubmit={handleReset} style={form}>
+            {/* New Password */}
+            <div style={inputContainer}>
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="New Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                style={input}
+              />
+              <span
+                onClick={() => setShowPassword((prev) => !prev)}
+                style={eyeIcon}
+              >
+                {showPassword ? <FiEyeOff /> : <FiEye />}
+              </span>
+            </div>
 
-          {/* Confirm Password */}
-          <div style={inputContainer}>
-            <input
-              type={showConfirmPassword ? "text" : "password"}
-              placeholder="Confirm Password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              style={input}
-            />
-            <span
-              onClick={() => setShowConfirmPassword((prev) => !prev)}
-              style={eyeIcon}
-            >
-              {showConfirmPassword ? <FiEyeOff /> : <FiEye />}
-            </span>
-          </div>
+            {/* Confirm Password */}
+            <div style={inputContainer}>
+              <input
+                type={showConfirmPassword ? "text" : "password"}
+                placeholder="Confirm Password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                style={input}
+              />
+              <span
+                onClick={() => setShowConfirmPassword((prev) => !prev)}
+                style={eyeIcon}
+              >
+                {showConfirmPassword ? <FiEyeOff /> : <FiEye />}
+              </span>
+            </div>
 
-          <button type="submit" style={button} disabled={loading}>
-            {loading ? "Updating..." : "Reset Password"}
+            <button type="submit" style={button} disabled={loading}>
+              {loading ? "Updating..." : "Reset Password"}
+            </button>
+          </form>
+        ) : null}
+
+        {message.type === "error" && (
+          <button
+            onClick={() => navigate("/forgot-password")}
+            style={{
+              ...button,
+              marginTop: "15px",
+              background: "linear-gradient(90deg, #ff6b6b 0%, #ee5a6f 100%)",
+            }}
+          >
+            Request New Reset Link
           </button>
-        </form>
+        )}
 
         <p style={backToLogin} onClick={() => navigate("/login")}>
           ← Back to Login
