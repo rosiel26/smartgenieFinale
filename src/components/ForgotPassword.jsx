@@ -31,9 +31,7 @@ export default function ForgotPassword() {
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo:
-          import.meta.env.VITE_SUPABASE_PASSWORD_RESET_URL ||
-          `${window.location.origin}/reset-password`,
+        redirectTo: "https://www.smartgeniefitness.com/reset-password",
       });
 
       if (error) {

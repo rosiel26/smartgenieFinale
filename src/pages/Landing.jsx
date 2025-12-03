@@ -20,9 +20,12 @@ function LandingPage() {
   }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) navigate("/personaldashboard", { replace: true });
-    });
+    // Only redirect if the user is on the root path "/"
+    if (window.location.pathname === "/") {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) navigate("/personaldashboard", { replace: true });
+      });
+    }
   }, [navigate]);
 
   function handleFileUpload(event) {

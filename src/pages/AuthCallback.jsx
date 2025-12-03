@@ -10,10 +10,24 @@ export default function AuthCallback() {
   useEffect(() => {
     const handleSession = async () => {
       try {
+        // Check for password recovery specifically
+        console.log("AuthCallback - Current URL Search:", window.location.search);
+        const params = new URLSearchParams(window.location.search);
+        const type = params.get("type");
+        console.log("AuthCallback - Extracted 'type' parameter:", type);
+
+        if (type === "recovery") {
+          console.log("AuthCallback - Detected type=recovery, navigating to /reset-password");
+          navigate("/reset-password", { replace: true });
+          return;
+        }
+
         const {
           data: { session },
           error: sessionError,
         } = await supabase.auth.getSession();
+        console.log("AuthCallback - Session data:", session);
+        console.log("AuthCallback - Session error:", sessionError);
 
         if (sessionError) {
           console.error("Session error:", sessionError);
