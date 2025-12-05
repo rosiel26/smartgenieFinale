@@ -42,10 +42,10 @@ export default function FAQ() {
     <div className="min-h-screen bg-gradient-to-br from-green-100 via-white to-green-200 flex items-center justify-center px-4 py-6">
       <div className="bg-white w-[380px] h-[720px] rounded-3xl shadow-2xl overflow-auto flex flex-col border border-green-100">
         {/* Header */}
-        <div className="bg-green-600 p-5 rounded-t-3xl text-white shadow-lg flex items-center justify-between">
+        <div className="bg-black p-5 rounded-t-3xl text-white shadow-lg flex items-center justify-between">
           <button
             onClick={() => navigate("/settings")}
-            className="text-white text-lg p-1 hover:bg-green-500 rounded transition"
+            className="text-white text-lg p-1 hover:text-xl rounded transition"
           >
             <FiArrowLeft />
           </button>

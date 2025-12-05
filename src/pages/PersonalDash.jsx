@@ -2,8 +2,6 @@ import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "../supabaseClient";
 import { useNavigate } from "react-router-dom";
 import FooterNav from "../components/FooterNav";
-import { FaPlus } from "react-icons/fa";
-import { BsCircleFill } from "react-icons/bs";
 import MealDetailModal from "../components/MealDetailModal";
 import NutritionProtocolDisplay from "../components/NutritionProtocolDisplay";
 import MyStatusDisplay from "../components/MyStatusDisplay";
@@ -14,13 +12,17 @@ import {
   getBoholCities,
   recommendStoresForIngredients,
 } from "../services/storeService";
-
+import useWorkoutTypes from "../hooks/useWorkoutTypes";
+import { isWorkoutSafe } from "../utils/workoutUtils";
+import TodaysExercise from "../components/TodaysExercise";
+import AddWorkoutModal from "../components/AddWorkoutModal";
 const PersonalDashboard = React.memo(function PersonalDashboard() {
   const [profile, setProfile] = useState(null);
   const [view, setView] = useState("nutrition-protocol");
   const [nutritionAdvice, setNutritionAdvice] = useState([]);
   const [dishes, setDishes] = useState([]);
   const [mealLog, setMealLog] = useState([]);
+  const [weeklyPlan, setWeeklyPlan] = useState([]);
   const [workouts, setWorkouts] = useState([]);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successText, setSuccessText] = useState("");
@@ -39,6 +41,13 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
   const [selectedCityId, setSelectedCityId] = useState("tagbilaran");
   const [storeTypeFilters, setStoreTypeFilters] = useState([]);
   const [storeRecommendations, setStoreRecommendations] = useState([]);
+
+  // New state for workout feature
+  const [showWorkoutModal, setShowWorkoutModal] = useState(false);
+  const [selectedWorkout, setSelectedWorkout] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const workoutTypes = useWorkoutTypes();
 
   const radius = 52;
   const circumference = 2 * Math.PI * radius;
@@ -104,7 +113,7 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
           await Promise.all([
             supabase
               .from("health_profiles")
-              .select("*")
+              .select("*, weekly_plan_json")
               .eq("user_id", user.id)
               .single(),
             supabase
@@ -128,6 +137,7 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
         // Handle profile data
         if (!profileResult.error && profileResult.data) {
           setProfile(profileResult.data);
+          setWeeklyPlan(profileResult.data.weekly_plan_json || null); // Set weeklyPlan
           setNutritionAdvice(generateNutritionAdvice(profileResult.data));
         } else {
           navigate("/profile");
@@ -137,27 +147,23 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
 
         // Handle meal logs
         if (mealResult.error) {
-          console.error("Meal logs fetch error:", mealResult.error.message);
         } else {
           setMealLog(mealResult.data || []);
         }
 
         // Handle workouts
         if (workoutResult.error) {
-          console.error("Workout fetch error:", workoutResult.error.message);
         } else {
           setWorkouts(workoutResult.data || []);
         }
 
         // Handle dishes and filter by health conditions
         if (dishesResult.error) {
-          console.error("Dish fetch error:", dishesResult.error.message);
         } else {
           // ❗ Don't pre-filter by health conditions here — keep all dishes
           setDishes(dishesResult.data || []);
         }
       } catch (error) {
-        console.error("Error fetching data:", error);
       } finally {
         setIsLoading(false);
       }
@@ -166,6 +172,12 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
     fetchData();
   }, [navigate]);
 
+  useEffect(() => {
+    // Log weeklyPlan after it's set
+    if (weeklyPlan) {
+      // console.log("Weekly Plan after set:", weeklyPlan);
+    }
+  }, [weeklyPlan]); // Add weeklyPlan to dependencies
   useEffect(() => {
     const fetchAllergens = async () => {
       const { data, error } = await supabase.from("allergens").select("*");
@@ -571,6 +583,55 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
     [formatDate, setMealLog, setSuccessText, setShowSuccessModal]
   );
 
+  const todaysWorkout = useMemo(() => {
+    if (!workoutTypes.length || !profile) return null;
+    const safeWorkouts = workoutTypes.filter(
+      (w) => isWorkoutSafe(w, profile.health_conditions).safe
+    );
+    if (safeWorkouts.length === 0) return null;
+
+    const dayOfYear = Math.floor(
+      (new Date() - new Date(new Date().getFullYear(), 0, 0)) /
+        (1000 * 60 * 60 * 24)
+    );
+    return safeWorkouts[dayOfYear % safeWorkouts.length];
+  }, [workoutTypes, profile]);
+
+  const handleAddWorkout = async (workoutId, durationMinutes) => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user || !workoutId || !durationMinutes) {
+      setSuccessText("Please fill all fields.");
+      setShowSuccessModal(true);
+      return;
+    }
+    setLoading(true);
+    const { error } = await supabase.from("workouts").insert([
+      {
+        user_id: user.id,
+        workout_type_id: workoutId,
+        duration: durationMinutes,
+      },
+    ]);
+    setLoading(false);
+
+    if (error) {
+      setSuccessText("Error saving workout: " + error.message);
+    } else {
+      setSuccessText("Workout logged successfully!");
+      // Refetch workouts to update the dashboard
+      const { data, error: fetchError } = await supabase
+        .from("workouts")
+        .select("calories_burned, fat_burned, carbs_burned")
+        .eq("user_id", user.id);
+      if (!fetchError) setWorkouts(data);
+    }
+    setShowSuccessModal(true);
+    setShowWorkoutModal(false);
+    setSelectedWorkout(null);
+  };
+
   // Early return after all hooks
   if (isLoading || !profile)
     return (
@@ -635,7 +696,6 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
           {/* Nutrition Protocol */}
           {view === "nutrition-protocol" && (
             <div className="space-y-5">
-              {/* My Status */}
               <MyStatusDisplay
                 profile={profile}
                 remainingTotals={remainingTotals}
@@ -649,8 +709,19 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
                 radius={radius}
                 circumference={circumference}
               />
+
+              <div className="grid grid-cols-1 gap-5">
+                <TodaysExercise
+                  workout={todaysWorkout}
+                  onAdd={() => {
+                    setSelectedWorkout(todaysWorkout);
+                    setShowWorkoutModal(true);
+                  }}
+                />
+              </div>
+              <hr />
               <RecentMealAndWorkoutLogs />
-              {/* Nutrition Protocol */}
+
               <NutritionProtocolDisplay
                 dailyCalories={dailyCalories}
                 dailyProtein={dailyProtein}
@@ -716,13 +787,25 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
               onClick={(e) => e.stopPropagation()}
             >
               <h3 className="text-lg font-semibold mb-2 text-green-700">
-                Meal Log
+                Success
               </h3>
               <p className="text-sm text-gray-700 mb-4">{successText}</p>
-              <div className="flex justify-end"></div>
             </div>
           </div>
         )}
+
+        <AddWorkoutModal
+          show={showWorkoutModal}
+          onClose={() => {
+            setShowWorkoutModal(false);
+            setSelectedWorkout(null);
+          }}
+          workout={selectedWorkout}
+          profile={profile}
+          onAdd={handleAddWorkout}
+          loading={loading}
+          notRecommended={selectedWorkout?.notRecommended}
+        />
 
         <FooterNav />
       </div>

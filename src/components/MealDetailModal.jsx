@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 const MealDetailModal = ({
   showMealModal,
@@ -18,18 +18,35 @@ const MealDetailModal = ({
   onStoreTypeFilterChange = () => {},
   storeRecommendations = [],
 }) => {
+  const [editableIngredients, setEditableIngredients] = useState([]);
+
+  useEffect(() => {
+    if (selectedDish?.ingredients_dish_id_fkey) {
+      // Initialize editableIngredients with current amounts, ensuring each ingredient has an 'id' for keying
+      setEditableIngredients(
+        selectedDish.ingredients_dish_id_fkey.map((ing) => ({
+          ...ing,
+          // Ensure a unique ID is present, fallback to name if ID is missing (though ID is preferred)
+          id: ing.id || ing.name,
+        }))
+      );
+    } else {
+      setEditableIngredients([]);
+    }
+  }, [selectedDish]);
+
   useEffect(() => {
     if (selectedDish) setServingSize(100);
   }, [selectedDish]);
 
-  const computeDishTotals = (dish) => {
-    const ingredients = dish?.ingredients_dish_id_fkey || [];
-    return ingredients.reduce(
+  const computeDishTotals = (dish, ingredientsToUse) => {
+    const ingredientsList = ingredientsToUse || dish?.ingredients_dish_id_fkey || [];
+    return ingredientsList.reduce(
       (totals, ing) => ({
-        calories: totals.calories + (ing.calories || 0),
-        protein: totals.protein + (ing.protein || 0),
-        carbs: totals.carbs + (ing.carbs || 0),
-        fats: totals.fats + (ing.fats || 0),
+        calories: totals.calories + (ing.calories || 0) * (ing.amount / 100 || 1),
+        protein: totals.protein + (ing.protein || 0) * (ing.amount / 100 || 1),
+        carbs: totals.carbs + (ing.carbs || 0) * (ing.amount / 100 || 1),
+        fats: totals.fats + (ing.fats || 0) * (ing.amount / 100 || 1),
       }),
       { calories: 0, protein: 0, carbs: 0, fats: 0 }
     );
@@ -45,12 +62,14 @@ const MealDetailModal = ({
         fats: selectedDish.fats || 0,
       };
     }
-    return computeDishTotals(selectedDish);
-  }, [selectedDish]);
+    // Pass editableIngredients to computeDishTotals
+    return computeDishTotals(selectedDish, editableIngredients);
+  }, [selectedDish, editableIngredients]);
 
   const multiplier = servingSize / 100;
   const steps = selectedDish?.steps || [];
-  const ingredients = selectedDish?.ingredients_dish_id_fkey || [];
+  // Use editableIngredients here for rendering the table
+  const ingredientsToDisplay = editableIngredients;
   const storeRecs = storeRecommendations || [];
 
   const handleAdd = () => {
@@ -59,15 +78,23 @@ const MealDetailModal = ({
       setShowAlertModal(true);
       return;
     }
-    handleAddMeal(selectedDish, selectedMealType, multiplier, servingSize);
+    handleAddMeal(selectedDish, selectedMealType, multiplier, servingSize, editableIngredients);
     setShowMealModal(false);
+  };
+
+  const handleIngredientAmountChange = (ingredientId, newAmount) => {
+    setEditableIngredients((prevIngredients) =>
+      prevIngredients.map((ing) =>
+        ing.id === ingredientId ? { ...ing, amount: Number(newAmount) } : ing
+      )
+    );
   };
 
   if (!showMealModal || !selectedDish) return null;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[999]">
-      <div className="bg-white w-[380px] max-w-full h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden relative">
+      <div className="bg-white w-[365px] max-w-full h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden relative">
         {/* Close Button */}
         <button
           onClick={() => setShowMealModal(false)}
@@ -230,7 +257,7 @@ const MealDetailModal = ({
           )}
 
           {/* Ingredients */}
-          {ingredients.length > 0 && (
+          {ingredientsToDisplay.length > 0 && (
             <div>
               <h3 className="font-semibold text-gray-800 text-center mb-2">
                 Ingredients
@@ -238,7 +265,7 @@ const MealDetailModal = ({
               {selectedDish.source === "dishinfo" ? (
                 <div className="text-center">
                   <ul className="list-disc list-inside text-gray-700 text-sm space-y-1">
-                    {ingredients.map((ing, index) => (
+                    {ingredientsToDisplay.map((ing, index) => (
                       <li key={index}>{ing.name}</li>
                     ))}
                   </ul>
@@ -257,11 +284,21 @@ const MealDetailModal = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {ingredients.map((ing) => (
+                      {ingredientsToDisplay.map((ing) => (
                         <tr key={ing.id || ing.name} className="border-t">
                           <td className="p-2">{ing.name}</td>
                           <td className="p-2">
-                            {ing.amount} {ing.unit || ""}
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={ing.amount}
+                              onChange={(e) =>
+                                handleIngredientAmountChange(ing.id, e.target.value)
+                              }
+                              className="w-20 border rounded-lg px-2 py-1 focus:ring-2 focus:ring-lime-500 outline-none text-right"
+                            />{" "}
+                            {ing.unit || ""}
                           </td>
                           <td className="p-2 text-right">
                             {((ing.calories || 0) * multiplier).toFixed(1)}
@@ -294,7 +331,7 @@ const MealDetailModal = ({
                       <select
                         className="ml-1 border rounded px-2 py-1 text-sm"
                         value={selectedCityId}
-                        onChange={(e) => onCityChange(Number(e.target.value))}
+                        onChange={(e) => onCityChange(e.target.value)}
                       >
                         {boholCities.map((c) => (
                           <option key={c.id} value={c.id}>

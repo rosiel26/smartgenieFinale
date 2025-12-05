@@ -45,7 +45,7 @@ export default function ProtectedRoute({ children }) {
     // Listen for auth changes
     const { data: listener } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log("Auth state changed:", event);
+        // console.log("Auth state changed:", event);
 
         // Handle sign-out or token refresh failures
         if (event === "SIGNED_OUT" || event === "TOKEN_REFRESHED") {

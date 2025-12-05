@@ -11,6 +11,7 @@ import {
   FiEyeOff,
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
+import ConfirmOldPasswordModal from "../components/ConfirmOldPasswordModal";
 
 export default function AccountManagement() {
   const navigate = useNavigate();
@@ -22,11 +23,14 @@ export default function AccountManagement() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [showConfirmOldPasswordModal, setShowConfirmOldPasswordModal] =
+    useState(false);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
 
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [verifiedOldPassword, setVerifiedOldPassword] = useState(""); // New state to store the confirmed old password
   const [showPassword, setShowPassword] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [user, setUser] = useState(null);
@@ -58,13 +62,16 @@ export default function AccountManagement() {
         "feedback_submissions",
         "contact_messages",
       ];
-      
+
       const promises = tablesToCheck.map((table) =>
-        supabase.from(table).select("id", { count: "exact", head: true }).eq("user_id", uid)
+        supabase
+          .from(table)
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", uid)
       );
 
       const results = await Promise.all(promises);
-      const hasData = results.some(res => res.count > 0);
+      const hasData = results.some((res) => res.count > 0);
 
       setHasHealthData(hasData);
     } catch {
@@ -94,8 +101,10 @@ export default function AccountManagement() {
 
       if (errors.length > 0) {
         // Log individual errors for debugging
-        errors.forEach(error => console.error("Deletion error:", error));
-        throw new Error("Failed to clear some data. Check console for details.");
+        errors.forEach((error) => console.error("Deletion error:", error));
+        throw new Error(
+          "Failed to clear some data. Check console for details."
+        );
       }
 
       setHasHealthData(false);
@@ -173,6 +182,12 @@ export default function AccountManagement() {
     }
   };
 
+  const handleConfirmOldPassword = (password) => {
+    setVerifiedOldPassword(password); // Store the confirmed old password
+    setShowConfirmOldPasswordModal(false); // Close the old password confirmation modal
+    setShowChangePasswordModal(true); // Open the change password modal
+  };
+
   const handleChangePassword = async () => {
     if (!newPassword || !confirmPassword) {
       setErrorText("Please fill in all fields.");
@@ -180,12 +195,25 @@ export default function AccountManagement() {
       return;
     }
     if (newPassword !== confirmPassword) {
-      setErrorText("Passwords do not match.");
+      setErrorText("New passwords do not match.");
       setShowErrorModal(true);
       return;
     }
-    if (newPassword.length < 6) {
-      setErrorText("Password must be at least 6 characters.");
+    if (newPassword === verifiedOldPassword) {
+      setErrorText("New password must be different from the old password.");
+      setShowErrorModal(true);
+      return;
+    }
+    if (
+      newPassword.length < 8 ||
+      !/[A-Z]/.test(newPassword) ||
+      !/[a-z]/.test(newPassword) ||
+      !/[0-9]/.test(newPassword) ||
+      !/[@$!%*?&]/.test(newPassword)
+    ) {
+      setErrorText(
+        "New password must be at least 8 characters long and include at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&)."
+      );
       setShowErrorModal(true);
       return;
     }
@@ -199,6 +227,7 @@ export default function AccountManagement() {
       setShowChangePasswordModal(false);
       setNewPassword("");
       setConfirmPassword("");
+      setVerifiedOldPassword(""); // Clear the verified old password after successful change
       setSuccessMessage("✅ Password updated successfully!");
       setShowSuccessToast(true);
       setTimeout(() => setShowSuccessToast(false), 2500);
@@ -211,10 +240,10 @@ export default function AccountManagement() {
     <>
       <div className="min-h-screen bg-gradient-to-br from-green-100 via-white to-green-200 flex items-center justify-center px-4 py-6">
         <div className="bg-white w-[380px] h-[720px] rounded-3xl shadow-2xl overflow-auto flex flex-col border border-green-100 relative">
-          <div className="bg-green-600 p-5 rounded-t-3xl text-white shadow-lg flex items-center justify-between">
+          <div className="bg-black p-5 rounded-t-3xl text-white shadow-lg flex items-center justify-between">
             <button
               onClick={() => navigate("/settings")}
-              className="text-white text-lg p-1 hover:bg-green-500 rounded transition"
+              className="text-white text-lg p-1 hover:text-xl rounded transition"
             >
               <FiArrowLeft />
             </button>
@@ -230,9 +259,9 @@ export default function AccountManagement() {
 
             <div className="bg-blue-50 p-4 rounded-xl shadow-sm">
               <button
-                onClick={() => setShowChangePasswordModal(true)}
+                onClick={() => setShowConfirmOldPasswordModal(true)}
                 disabled={loading}
-                className="w-full bg-blue-600 text-white py-2 rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2 font-medium"
+                className="w-full bg-black text-white py-2 rounded-xl hover:bg-gray-700 transition flex items-center justify-center gap-2 font-medium"
               >
                 <FiKey /> Change Password
               </button>
@@ -242,7 +271,7 @@ export default function AccountManagement() {
               <button
                 onClick={() => setShowClearModal(true)}
                 disabled={loading}
-                className="w-full bg-green-600 text-white py-2 rounded-xl hover:bg-green-700 transition flex items-center justify-center gap-2 font-medium"
+                className="w-full bg-lime-500 text-black py-2 rounded-xl hover:bg-lime-700 transition flex items-center justify-center gap-2 font-medium"
               >
                 <FiDatabase /> Clear Health Profiles & Meal Logs
               </button>
@@ -267,6 +296,23 @@ export default function AccountManagement() {
       </div>
 
       <AnimatePresence>
+        {showConfirmOldPasswordModal && (
+          <motion.div
+            key="confirm-old-password-modal" // Unique key for AnimatePresence
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50" // Apply consistent styling
+          >
+            <ConfirmOldPasswordModal
+              visible={showConfirmOldPasswordModal} // Modal now uses its own visible prop
+              onConfirm={handleConfirmOldPassword}
+              onCancel={() => setShowConfirmOldPasswordModal(false)}
+              confirmLoading={loading}
+            />
+          </motion.div>
+        )}
+
         {showChangePasswordModal && (
           <motion.div
             key="change-password-modal"
@@ -303,7 +349,7 @@ export default function AccountManagement() {
               <div className="relative flex items-center">
                 <input
                   type={showPassword ? "text" : "password"}
-                  placeholder="Confirm Password"
+                  placeholder="Confirm New Password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="w-full border border-gray-300 p-2 rounded-lg pr-10"

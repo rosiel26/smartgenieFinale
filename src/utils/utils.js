@@ -74,3 +74,17 @@ export const isDesktop = () => {
     navigator.userAgent
   );
 };
+
+export const getCurrentMealType = () => {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) {
+    return "Breakfast";
+  }
+  if (hour >= 12 && hour < 17) {
+    return "Lunch";
+  }
+  if (hour >= 17 || hour < 5) {
+    return "Dinner";
+  }
+  return "Snack"; // Default or fallback
+};
