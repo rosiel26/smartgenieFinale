@@ -79,48 +79,98 @@ export default function Mealplan({ userId }) {
       let plan = null;
       let shouldRegeneratePlan = false;
 
-      if (profileData.plan_start_date && profileData.plan_end_date) {
-        const savedPlanRaw = localStorage.getItem(`weeklyPlan_${user.id}`);
-        if (savedPlanRaw) {
-          plan = JSON.parse(savedPlanRaw);
+      // Helper to parse local dates consistently
+      const parseLocalDate = (dateStr) => {
+        if (!dateStr) return null;
+        const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (match) {
+          return new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
+        }
+        return new Date(dateStr);
+      };
 
-          // Parse dates from the SAVED PLAN, not profile data, to avoid sync issues
-          // Use the plan's own start_date and end_date for consistency
-          const planStartStr = plan.start_date || profileData.plan_start_date;
-          const planEndStr = plan.end_date || profileData.plan_end_date;
-          
-          // Parse date strings consistently - extract year, month, day parts
-          const parseLocalDate = (dateStr) => {
-            if (!dateStr) return null;
-            // Handle both "YYYY-MM-DD" and ISO format "YYYY-MM-DDTHH:mm:ss.sssZ"
-            const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
-            if (match) {
-              return new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
-            }
-            return new Date(dateStr);
-          };
-          
+      if (profileData.weekly_plan_json) {
+        try {
+          const supabasePlan = profileData.weekly_plan_json;
+
+          const planStartStr = supabasePlan.start_date || profileData.plan_start_date;
+          const planEndStr = supabasePlan.end_date || profileData.plan_end_date;
+
           const planStartDate = parseLocalDate(planStartStr);
           const planEndDate = parseLocalDate(planEndStr);
-          
+
           const now = new Date();
           const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-          // Calculate duration using consistently parsed dates
           const planDuration = planStartDate && planEndDate
             ? Math.round((planEndDate.getTime() - planStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
             : 0;
 
-          // Only regenerate if plan has expired OR duration doesn't match timeframe
           if (planEndDate < today || Math.abs(planDuration - profileData.timeframe) > 1) {
             shouldRegeneratePlan = true;
-            plan = null;
+            plan = null; // Mark for regeneration
+          } else {
+            plan = supabasePlan; // Use Supabase plan
           }
-        } else {
-          shouldRegeneratePlan = true;
+        } catch (e) {
+          console.error("Error parsing Supabase weekly_plan_json:", e);
+          shouldRegeneratePlan = true; // Fallback to regeneration if parsing fails
         }
       } else {
-        shouldRegeneratePlan = true;
+        shouldRegeneratePlan = true; // No plan in Supabase, mark for regeneration
+      }
+
+      // If no plan from Supabase or it needs regeneration, check local storage
+      if (!plan && shouldRegeneratePlan) {
+        const savedPlanRaw = localStorage.getItem(`weeklyPlan_${user.id}`);
+        if (savedPlanRaw) {
+          try {
+            const localPlan = JSON.parse(savedPlanRaw);
+
+            const planStartStr = localPlan.start_date || profileData.plan_start_date;
+            const planEndStr = localPlan.end_date || profileData.plan_end_date;
+
+            const planStartDate = parseLocalDate(planStartStr);
+            const planEndDate = parseLocalDate(planEndStr);
+
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+            const planDuration = planStartDate && planEndDate
+              ? Math.round((planEndDate.getTime() - planStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+              : 0;
+
+            if (planEndDate < today || Math.abs(planDuration - profileData.timeframe) > 1) {
+              // Local plan also expired/invalid
+              shouldRegeneratePlan = true;
+              plan = null;
+            } else {
+              plan = localPlan; // Use local plan
+              shouldRegeneratePlan = false; // A valid plan found, no regeneration needed for now
+              // If local plan is valid and was used, update Supabase to sync it
+              const planStartISO = new Date(localPlan.start_date).toISOString();
+              const planEndISO = new Date(localPlan.end_date).toISOString();
+              const safePlanJSON = JSON.parse(JSON.stringify(localPlan));
+
+              const { error: updateError } = await supabase
+                .from("health_profiles")
+                .update({
+                  plan_start_date: planStartISO,
+                  plan_end_date: planEndISO,
+                  weekly_plan_json: safePlanJSON,
+                })
+                .eq("user_id", user.id);
+
+              if (updateError) 
+                console.error("Supabase update error when syncing local plan:", updateError);
+            }
+          } catch (e) {
+            console.error("Error parsing local storage weeklyPlan:", e);
+            shouldRegeneratePlan = true; // Fallback to regeneration
+          }
+        } else {
+          shouldRegeneratePlan = true; // No plan in local storage either
+        }
       }
 
       if (!plan || shouldRegeneratePlan) {
