@@ -8,7 +8,7 @@ export const emojiMap = {
   Default: "🏋️",
 };
 
-export default function RecentLogs({ maxItems = 1 }) {
+export default function RecentLogs({ maxItems = 1, refreshTrigger = 0 }) {
   const [mealLogs, setMealLogs] = useState([]);
   const [workoutLogs, setWorkoutLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -73,11 +73,12 @@ export default function RecentLogs({ maxItems = 1 }) {
     } finally {
       setLoading(false);
     }
-  }, [maxItems]);
+  }, [maxItems, refreshTrigger]); // Add refreshTrigger to dependencies
 
   useEffect(() => {
+    // console.log("RecentLogs useEffect triggered, refreshTrigger:", refreshTrigger); // Debug log
     fetchLogs();
-  }, [fetchLogs]);
+  }, [fetchLogs, refreshTrigger]);
 
   if (loading)
     return <p className="text-gray-500 text-sm italic">Loading...</p>;

@@ -1,12 +1,26 @@
-import React from "react";
+import React, { useRef, useEffect, useState } from "react";
 import Navbar from "./NavBar";
 import FooterNav from "./FooterNav";
 
 export default function MainLayout({ children }) {
+  const mainLayoutRef = useRef(null);
+  const [mainLayoutBounds, setMainLayoutBounds] = useState(null);
+
+  useEffect(() => {
+    if (mainLayoutRef.current) {
+      const bounds = mainLayoutRef.current.getBoundingClientRect();
+      setMainLayoutBounds(bounds);
+      console.log("MainLayout Bounds:", bounds);
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-green-50 flex items-center justify-center px-4 py-6">
       {/* Mobile container */}
-      <div className="bg-white w-[375px] h-[700px] rounded-2xl shadow-2xl flex flex-col">
+      <div
+        ref={mainLayoutRef}
+        className="bg-white w-[375px] h-[700px] rounded-2xl shadow-2xl flex flex-col"
+      >
         {/* Fixed Navbar */}
 
         {/* Scrollable main content */}
@@ -16,7 +30,7 @@ export default function MainLayout({ children }) {
 
         {/* Footer navigation */}
 
-        <FooterNav />
+        <FooterNav mainLayoutBounds={mainLayoutBounds} />
       </div>
     </div>
   );

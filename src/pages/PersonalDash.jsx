@@ -13,7 +13,7 @@ import {
   recommendStoresForIngredients,
 } from "../services/storeService";
 import useWorkoutTypes from "../hooks/useWorkoutTypes";
-import { isWorkoutSafe } from "../utils/workoutUtils";
+import { isWorkoutSafe, calculateCaloriesBurned } from "../utils/workoutUtils";
 import TodaysExercise from "../components/TodaysExercise";
 import AddWorkoutModal from "../components/AddWorkoutModal";
 const PersonalDashboard = React.memo(function PersonalDashboard() {
@@ -46,6 +46,8 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
   const [showWorkoutModal, setShowWorkoutModal] = useState(false);
   const [selectedWorkout, setSelectedWorkout] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [todaysLoggedWorkout, setTodaysLoggedWorkout] = useState(null);
+  const [refreshRecentLogsTrigger, setRefreshRecentLogsTrigger] = useState(0);
 
   const workoutTypes = useWorkoutTypes();
 
@@ -458,7 +460,6 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
           : dish.health_condition?.toLowerCase().trim()
           ? [dish.health_condition.toLowerCase().trim()]
           : [];
-
         if (dishConditions.some((c) => userHealthConditions.includes(c))) {
           recommended = false;
         }
@@ -597,7 +598,49 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
     return safeWorkouts[dayOfYear % safeWorkouts.length];
   }, [workoutTypes, profile]);
 
-  const handleAddWorkout = async (workoutId, durationMinutes) => {
+  useEffect(() => {
+    const fetchTodaysLoggedWorkout = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user || !todaysWorkout) {
+        setTodaysLoggedWorkout(null);
+        return;
+      }
+
+      const today = formatDate(new Date());
+
+      const { data, error } = await supabase
+        .from("workouts")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("workout_type_id", todaysWorkout.id)
+        .order("created_at", { ascending: false }) // Get the most recent
+        .limit(1) // Only interested in the latest one
+        .maybeSingle(); // Get it if it exists
+
+      if (error && error.code !== "PGRST116") {
+        // PGRST116 means no rows found
+        // console.error("Error fetching today's logged workout:", error.message);
+        setTodaysLoggedWorkout(null);
+      } else if (data) {
+        setTodaysLoggedWorkout(data);
+        // console.log("Fetched todaysLoggedWorkout on load:", data); // Debug log
+      } else {
+        setTodaysLoggedWorkout(null);
+        // console.log("Fetched todaysLoggedWorkout on load: null"); // Debug log
+      }
+    };
+
+    fetchTodaysLoggedWorkout();
+  }, [profile, todaysWorkout, formatDate]);
+
+  const handleSaveWorkout = async (
+    workoutId,
+    durationMinutes,
+    workoutLogId = null
+  ) => {
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -607,20 +650,73 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
       return;
     }
     setLoading(true);
-    const { error } = await supabase.from("workouts").insert([
-      {
-        user_id: user.id,
-        workout_type_id: workoutId,
-        duration: durationMinutes,
-      },
-    ]);
+
+    const workoutData = {
+      user_id: user.id,
+      workout_type_id: workoutId,
+      duration: durationMinutes,
+      // Recalculate burned macros based on new duration
+      calories_burned: calculateCaloriesBurned(
+        selectedWorkout.met_value,
+        profile.weight_kg,
+        durationMinutes
+      ),
+      // Placeholder calculations for fat/carbs burned - NEEDS ACCURATE FORMULA/SCHEMA INFO
+      // Assuming a general split for demonstration; replace with actual logic
+      fat_burned:
+        (calculateCaloriesBurned(
+          selectedWorkout.met_value,
+          profile.weight_kg,
+          durationMinutes
+        ) *
+          0.3) /
+        9, // Example: 30% of calories from fat, 9kcal/g fat
+      carbs_burned:
+        (calculateCaloriesBurned(
+          selectedWorkout.met_value,
+          profile.weight_kg,
+          durationMinutes
+        ) *
+          0.7) /
+        4, // Example: 70% of calories from carbs, 4kcal/g carb
+    };
+
+    let error;
+    let newWorkoutLog;
+
+    if (workoutLogId) {
+      // Update existing workout log
+      const { data, error: updateError } = await supabase
+        .from("workouts")
+        .update(workoutData)
+        .eq("id", workoutLogId)
+        .select()
+        .maybeSingle(); // Changed from .single()
+      error = updateError;
+      newWorkoutLog = data;
+      console.log("Updated workout log:", newWorkoutLog); // Debug log
+    } else {
+      // Insert new workout log
+      const { data, error: insertError } = await supabase
+        .from("workouts")
+        .insert([workoutData])
+        .select()
+        .maybeSingle(); // Changed from .single()
+      error = insertError;
+      newWorkoutLog = data;
+      console.log("Inserted workout log:", newWorkoutLog); // Debug log
+    }
     setLoading(false);
 
     if (error) {
       setSuccessText("Error saving workout: " + error.message);
+      console.error("Error saving workout:", error); // Log the full error object
     } else {
       setSuccessText("Workout logged successfully!");
-      // Refetch workouts to update the dashboard
+      setTodaysLoggedWorkout(newWorkoutLog); // Update today's logged workout state
+      setRefreshRecentLogsTrigger((prev) => prev + 1); // Increment to trigger refresh
+
+      // Refetch all workouts to update the dashboard totals
       const { data, error: fetchError } = await supabase
         .from("workouts")
         .select("calories_burned, fat_burned, carbs_burned")
@@ -717,10 +813,19 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
                     setSelectedWorkout(todaysWorkout);
                     setShowWorkoutModal(true);
                   }}
+                  onEdit={(workout) => {
+                    setSelectedWorkout(workout); // This should be todaysWorkout
+                    setShowWorkoutModal(true);
+                  }}
+                  isLogged={!!todaysLoggedWorkout}
+                  loggedDuration={todaysLoggedWorkout?.duration}
+                  loggedCaloriesBurned={todaysLoggedWorkout?.calories_burned}
                 />
               </div>
               <hr />
-              <RecentMealAndWorkoutLogs />
+              <RecentMealAndWorkoutLogs
+                refreshTrigger={refreshRecentLogsTrigger}
+              />
 
               <NutritionProtocolDisplay
                 dailyCalories={dailyCalories}
@@ -802,7 +907,8 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
           }}
           workout={selectedWorkout}
           profile={profile}
-          onAdd={handleAddWorkout}
+          onAdd={handleSaveWorkout} // Changed to handleSaveWorkout
+          existingWorkoutLog={todaysLoggedWorkout} // Pass existing workout log for editing
           loading={loading}
           notRecommended={selectedWorkout?.notRecommended}
         />

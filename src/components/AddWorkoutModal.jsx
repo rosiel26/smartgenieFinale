@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { calculateCaloriesBurned } from "../utils/workoutUtils";
 import AlertModal from "./AlertModal";
 
@@ -40,14 +40,27 @@ const AddWorkoutModal = ({
   onClose,
   workout,
   profile,
-  onAdd,
+  onAdd, // This is handleSaveWorkout from parent
   loading,
   notRecommended,
+  existingWorkoutLog, // Add this prop
 }) => {
   const [hours, setHours] = useState("");
   const [minutes, setMinutes] = useState(30);
   const [showAlert, setShowAlert] = useState("");
   const [showConfirm, setShowConfirm] = useState(false);
+
+  // Pre-fill duration if existingWorkoutLog is provided
+  useEffect(() => {
+    if (existingWorkoutLog) {
+      const duration = existingWorkoutLog.duration;
+      setHours(Math.floor(duration / 60));
+      setMinutes(duration % 60);
+    } else {
+      setHours("");
+      setMinutes(30); // Default for new workout
+    }
+  }, [existingWorkoutLog]);
 
   if (!show || !workout) return null;
 
@@ -75,18 +88,24 @@ const AddWorkoutModal = ({
       return;
     }
 
-    await onAdd(workout.id, totalDurationMinutes);
+    await onAdd(workout.id, totalDurationMinutes, existingWorkoutLog?.id); // Pass workoutLogId
     onClose();
-    setHours("");
-    setMinutes(30);
+    // Reset state after successful add/edit
+    if (!existingWorkoutLog) { // Only reset for new workouts, existingWorkoutLog will be nullified by parent after close
+        setHours("");
+        setMinutes(30);
+    }
   };
 
   const handleConfirm = async () => {
     setShowConfirm(false);
-    await onAdd(workout.id, totalDurationMinutes);
+    await onAdd(workout.id, totalDurationMinutes, existingWorkoutLog?.id); // Pass workoutLogId
     onClose();
-    setHours("");
-    setMinutes(30);
+    // Reset state after successful add/edit
+    if (!existingWorkoutLog) { // Only reset for new workouts, existingWorkoutLog will be nullified by parent after close
+        setHours("");
+        setMinutes(30);
+    }
   };
 
   const handleCancelConfirm = () => {
@@ -182,7 +201,7 @@ const AddWorkoutModal = ({
               onClick={handleAdd}
               className="w-full py-2 rounded-xl bg-black text-white hover:bg-gray-700 active:scale-95 transition font-semibold"
             >
-              {loading ? "Adding..." : "Add Workout"}
+              {loading ? "Saving..." : (existingWorkoutLog ? "Update Workout" : "Add Workout")}
             </button>
           </div>
         </div>

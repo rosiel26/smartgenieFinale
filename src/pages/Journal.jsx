@@ -28,6 +28,9 @@ export default function Journal() {
   const [profile, setProfile] = useState(null);
   const [mealLog, setMealLog] = useState([]);
   const [workoutLog, setWorkoutLog] = useState([]);
+  const [selectedMealLogs, setSelectedMealLogs] = useState([]);
+  const [selectedWorkoutLogs, setSelectedWorkoutLogs] = useState([]);
+  const [isMultiDeleteMode, setIsMultiDeleteMode] = useState(false);
   const [selectedDay, setSelectedDay] = useState(new Date());
   const [mealTypeFilter, setMealTypeFilter] = useState("");
   const ITEMS_PER_PAGE = 6;
@@ -71,6 +74,12 @@ export default function Journal() {
       console.error("Data fetch failed:", err);
     }
   }, [navigate]);
+
+  useEffect(() => {
+    setIsMultiDeleteMode(false);
+    setSelectedMealLogs([]);
+    setSelectedWorkoutLogs([]);
+  }, [selectedDay, mealTypeFilter]);
 
   useEffect(() => {
     fetchData();
@@ -122,27 +131,97 @@ export default function Journal() {
     [filteredWorkoutLogs]
   );
 
-  const [deleteConfirm, setDeleteConfirm] = useState({ show: false, type: null, id: null });
+  const [deleteConfirm, setDeleteConfirm] = useState({
+    show: false,
+    type: null,
+    idsToDelete: [],
+  });
 
-  // Delete handlers
-  const handleDeleteMeal = async (id) => {
-    const { error } = await supabase.from("meal_logs").delete().eq("id", id);
-    if (!error) setMealLog((prev) => prev.filter((m) => m.id !== id));
-    setDeleteConfirm({ show: false, type: null, id: null });
+  const toggleSelectMeal = useCallback((id) => {
+    setSelectedMealLogs((prev) =>
+      prev.includes(id) ? prev.filter((_id) => _id !== id) : [...prev, id]
+    );
+  }, []);
+
+  const toggleSelectWorkout = useCallback((id) => {
+    setSelectedWorkoutLogs((prev) =>
+      prev.includes(id) ? prev.filter((_id) => _id !== id) : [...prev, id]
+    );
+  }, []);
+
+  const toggleSelectAllMeals = useCallback(
+    (checked) => {
+      if (checked) {
+        setSelectedMealLogs(filteredMealLogs.map((meal) => meal.id));
+      } else {
+        setSelectedMealLogs([]);
+      }
+    },
+    [filteredMealLogs]
+  );
+
+  const toggleSelectAllWorkouts = useCallback(
+    (checked) => {
+      if (checked) {
+        setSelectedWorkoutLogs(
+          filteredWorkoutLogs.map((workout) => workout.id)
+        );
+      } else {
+        setSelectedWorkoutLogs([]);
+      }
+    },
+    [filteredWorkoutLogs]
+  );
+
+  const clearSelections = () => {
+    setSelectedMealLogs([]);
+    setSelectedWorkoutLogs([]);
+    setIsMultiDeleteMode(false);
   };
 
-  const handleDeleteWorkout = async (id) => {
-    const { error } = await supabase.from("workouts").delete().eq("id", id);
-    if (!error) setWorkoutLog((prev) => prev.filter((w) => w.id !== id));
-    setDeleteConfirm({ show: false, type: null, id: null });
+  // Delete handlers
+  const handleDeleteMeal = async (ids) => {
+    const { error } = await supabase.from("meal_logs").delete().in("id", ids);
+    if (!error) {
+      setMealLog((prev) => prev.filter((m) => !ids.includes(m.id)));
+      setSelectedMealLogs((prev) => prev.filter((id) => !ids.includes(id)));
+    }
+    setDeleteConfirm({ show: false, type: null, idsToDelete: [] });
+  };
+
+  const handleDeleteWorkout = async (ids) => {
+    const { error } = await supabase.from("workouts").delete().in("id", ids);
+    if (!error) {
+      setWorkoutLog((prev) => prev.filter((w) => !ids.includes(w.id)));
+      setSelectedWorkoutLogs((prev) => prev.filter((id) => !ids.includes(id)));
+    }
+    setDeleteConfirm({ show: false, type: null, idsToDelete: [] });
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedMealLogs.length > 0) {
+      setDeleteConfirm({
+        show: true,
+        type: "meal",
+        idsToDelete: selectedMealLogs,
+      });
+    }
+    if (selectedWorkoutLogs.length > 0) {
+      setDeleteConfirm({
+        show: true,
+        type: "workout",
+        idsToDelete: selectedWorkoutLogs,
+      });
+    }
   };
 
   const confirmDelete = () => {
     if (deleteConfirm.type === "meal") {
-      handleDeleteMeal(deleteConfirm.id);
+      handleDeleteMeal(deleteConfirm.idsToDelete);
     } else if (deleteConfirm.type === "workout") {
-      handleDeleteWorkout(deleteConfirm.id);
+      handleDeleteWorkout(deleteConfirm.idsToDelete);
     }
+    clearSelections(); // Clear selections after deletion
   };
 
   // Pagination
@@ -160,13 +239,15 @@ export default function Journal() {
     <div className="min-h-screen bg-green-50 flex items-center justify-center px-4 py-6">
       <div className="bg-white w-[375px] h-[700px] rounded-2xl shadow-2xl flex flex-col overflow-hidden relative">
         {/* Header */}
-
         <div className="rounded-t-2xl px-5 pt-6 pb-4 shadow-lg">
-          <div className="text-right text-black font-semibold text-sm mb-3">
-            {selectedDay.toLocaleDateString("en-US", {
-              month: "long",
-              year: "numeric",
-            })}
+          <div className="flex justify-between items-center mb-3">
+            <div className="text-black font-semibold text-sm">
+              {selectedDay.toLocaleDateString("en-US", {
+                month: "long",
+                year: "numeric",
+                day: "numeric",
+              })}
+            </div>
           </div>
 
           <div className="flex justify-between gap-1 overflow-x-auto pb-1">
@@ -325,13 +406,63 @@ export default function Journal() {
               </div>
             </div>
           </div>
+          <div className="border-t border-gray-300 pt-3 flex justify-end">
+            {isMultiDeleteMode && (
+              <div className="flex justify-between gap-2 mr-3">
+                <button
+                  onClick={handleBulkDelete}
+                  disabled={
+                    selectedMealLogs.length === 0 &&
+                    selectedWorkoutLogs.length === 0
+                  }
+                  className="bg-red-500 text-white px-3 py-2 rounded-md text-[10px] disabled:opacity-50"
+                >
+                  Delete Selected (
+                  {selectedMealLogs.length + selectedWorkoutLogs.length})
+                </button>
+                {/* <button
+                  onClick={clearSelections}
+                  className="bg-gray-300 text-gray-700 px-3 py-2 rounded-md text-[10px]"
+                >
+                  Clear Selections
+                </button> */}
+              </div>
+            )}
+            <button
+              onClick={() => setIsMultiDeleteMode((prev) => !prev)}
+              className={`px-3 py-1 text-xs border rounded-md hover:bg-red-600 hover:text-white transition ${
+                isMultiDeleteMode
+                  ? "bg-red-500 text-white"
+                  : "bg-gray-200 text-gray-700"
+              }`}
+            >
+              {isMultiDeleteMode ? "Cancel" : "Select to Delete"}
+            </button>
+          </div>
 
           {/* Logs */}
           <MealAndWorkoutLogs
             mealLogs={paginatedMealLogs}
             workoutLogs={paginatedWorkoutLogs}
-            onDeleteMeal={(id) => setDeleteConfirm({ show: true, type: "meal", id })}
-            onDeleteWorkout={(id) => setDeleteConfirm({ show: true, type: "workout", id })}
+            onDeleteMeal={(id) =>
+              setDeleteConfirm({ show: true, type: "meal", idsToDelete: [id] })
+            }
+            onDeleteWorkout={(id) =>
+              setDeleteConfirm({
+                show: true,
+                type: "workout",
+                idsToDelete: [id],
+              })
+            }
+            isMultiDeleteMode={isMultiDeleteMode}
+            selectedMealLogs={selectedMealLogs}
+            selectedWorkoutLogs={selectedWorkoutLogs}
+            onToggleSelectMeal={toggleSelectMeal}
+            onToggleSelectWorkout={toggleSelectWorkout}
+            onToggleSelectAllMeals={toggleSelectAllMeals}
+            onToggleSelectAllWorkouts={toggleSelectAllWorkouts}
+            filteredMealLogs={filteredMealLogs}
+            filteredWorkoutLogs={filteredWorkoutLogs}
           />
         </div>
 
@@ -349,11 +480,17 @@ export default function Journal() {
               Confirm Delete
             </h2>
             <p className="text-gray-600 mb-5">
-              Are you sure you want to delete this {deleteConfirm.type}?
+              Are you sure you want to delete{" "}
+              {deleteConfirm.idsToDelete.length > 1
+                ? `${deleteConfirm.idsToDelete.length} selected items`
+                : `this ${deleteConfirm.type}`}
+              ?
             </p>
             <div className="flex justify-center gap-3">
               <button
-                onClick={() => setDeleteConfirm({ show: false, type: null, id: null })}
+                onClick={() =>
+                  setDeleteConfirm({ show: false, type: null, idsToDelete: [] })
+                }
                 className="bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300"
               >
                 Cancel
