@@ -98,10 +98,10 @@ export const computeDishTotalsWithIngredientOverrides = (dish) => {
       const customCarbs = carbsPerGram * customAmt;
       const customFats = fatsPerGram * customAmt;
 
-      deltaCalories += customCalories - defaultCalories;
-      deltaProtein += customProtein - defaultProtein;
-      deltaCarbs += customCarbs - defaultCarbs;
-      deltaFats += customFats - defaultFats;
+      deltaCalories += Math.ceil(customCalories) - Math.ceil(defaultCalories);
+      deltaProtein += Math.ceil(customProtein) - Math.ceil(defaultProtein);
+      deltaCarbs += Math.ceil(customCarbs) - Math.ceil(defaultCarbs);
+      deltaFats += Math.ceil(customFats) - Math.ceil(defaultFats);
     }
   }
 
@@ -201,10 +201,10 @@ export const prepareDishForModal = (dish) => {
     const rawDisplayAmount = storedAmount * (servingSize / effectiveAmountBaseUnit);
     const displayAmount = Number.isInteger(rawDisplayAmount) ? rawDisplayAmount : +rawDisplayAmount.toFixed(1); // Round to 1 decimal if not integer, else keep as integer
 
-    const displayCalories = +(caloriesPerGram * displayAmount).toFixed(2);
-    const displayProtein = +(proteinPerGram * displayAmount).toFixed(2);
-    const displayCarbs = +(carbsPerGram * displayAmount).toFixed(2);
-    const displayFat = +(fatsPerGram * displayAmount).toFixed(2);
+    const displayCalories = Math.ceil(caloriesPerGram * displayAmount);
+    const displayProtein = Math.ceil(proteinPerGram * displayAmount);
+    const displayCarbs = Math.ceil(carbsPerGram * displayAmount);
+    const displayFat = Math.ceil(fatsPerGram * displayAmount);
 
     return {
       ...ingRaw,
@@ -234,10 +234,10 @@ export const prepareDishForModal = (dish) => {
   let base_total_fats = 0;
 
   for (const ing of ingredients) {
-    base_total_calories += ing.totalCaloriesForStored || 0;
-    base_total_protein += ing.totalProteinForStored || 0;
-    base_total_carbs += ing.totalCarbsForStored || 0;
-    base_total_fats += ing.totalFatsForStored || 0;
+    base_total_calories += Math.ceil(ing.totalCaloriesForStored || 0);
+    base_total_protein += Math.ceil(ing.totalProteinForStored || 0);
+    base_total_carbs += Math.ceil(ing.totalCarbsForStored || 0);
+    base_total_fats += Math.ceil(ing.totalFatsForStored || 0);
   }
 
   const scale = servingSize / amountBaseUnit;
@@ -297,13 +297,12 @@ const parseHealthCondition = (condition) => {
   return []; // Fallback for unexpected types
 };
 
-export const getSuggestedDishes = (profile, dishes, searchQuery = "") => {
-  if (!profile || !dishes?.length) return [];
+
+export const isDishSafeForProfile = (profile, dish) => {
+  if (!profile || !dish) return false;
 
   let userAllergens = (profile.allergens || []).map((a) => a.toLowerCase().trim());
   const userHealthConditions = (profile.health_conditions || []).map((hc) => hc.toLowerCase().trim());
-  const userGoal = profile.goal?.toLowerCase().trim();
-  const userEatingStyle = profile.eating_style?.toLowerCase().trim();
 
   const allergenMap = {
     meat: ["beef", "pork", "chicken", "turkey"],
@@ -318,42 +317,81 @@ export const getSuggestedDishes = (profile, dishes, searchQuery = "") => {
   }
   userAllergens = Array.from(expandedAllergens);
 
+  const ingredientsRaw = dish.ingredients_dish_id_fkey || dish.ingredients || [];
+  const ingredients = ingredientsRaw.map(normalizeIngredient);
+
+  const dishAllergens = Array.isArray(ingredientsRaw)
+    ? ingredients.flatMap((ing) => {
+        if (Array.isArray(ing.allergen_id)) {
+          return ing.allergen_id.map((a) => a.name.toLowerCase().trim());
+        }
+        return ing.allergen_id?.name ? [ing.allergen_id.name.toLowerCase().trim()] : [];
+      })
+    : [];
+
+  const dishIngredients = Array.isArray(ingredients)
+    ? ingredients.map((i) => i.name?.toLowerCase().trim() || "")
+    : [];
+
+  const dishHealth = parseHealthCondition(dish.health_condition);
+
+  const hasAllergen = userAllergens.some(
+    (ua) =>
+      dishAllergens.includes(ua) ||
+      dishIngredients.includes(ua) ||
+      dishIngredients.some((i) => new RegExp(`\\b${ua}\\b`).test(i)) || // More precise word boundary match
+      (dish.name || "").toLowerCase().includes(ua) ||
+      (dish.description || "").toLowerCase().includes(ua)
+  );
+    if (hasAllergen) {
+      return false;
+    }
+  
+    if (userHealthConditions.some((hc) => dishHealth.includes(hc))) {
+      return false;
+    }
+  
+    return true;
+  };
+
+export const identifyUnsafeMeals = (profile, weeklyPlan) => {
+  const unsafeMeals = [];
+  if (!profile || !weeklyPlan?.plan || !Array.isArray(weeklyPlan.plan)) {
+    return unsafeMeals;
+  }
+
+  for (const day of weeklyPlan.plan) {
+    for (const meal of day.meals) {
+      // Only check meals that are not yet logged
+      if (meal.status !== "added" && !isDishSafeForProfile(profile, meal)) {
+        unsafeMeals.push({
+          ...meal,
+          date: day.date,
+          day: day.day,
+        });
+      }
+    }
+  }
+  return unsafeMeals;
+};
+
+export const getSuggestedDishes = (profile, dishes, searchQuery = "") => {
+  if (!profile || !dishes?.length) return [];
+
+  const userGoal = profile.goal?.toLowerCase().trim();
+  const userEatingStyle = profile.eating_style?.toLowerCase().trim();
+
   return dishes.filter((dish) => {
-    const ingredientsRaw = dish.ingredients_dish_id_fkey || dish.ingredients || [];
-    const ingredients = ingredientsRaw.map(normalizeIngredient);
-
-    const dishAllergens = Array.isArray(ingredientsRaw)
-      ? ingredients.flatMap((ing) => {
-          if (Array.isArray(ing.allergen_id)) {
-            return ing.allergen_id.map((a) => a.name.toLowerCase().trim());
-          }
-          return ing.allergen_id?.name ? [ing.allergen_id.name.toLowerCase().trim()] : [];
-        })
-      : [];
-
-    const dishIngredients = Array.isArray(ingredients)
-      ? ingredients.map((i) => i.name?.toLowerCase().trim() || "")
-      : [];
-
-    const dishHealth = parseHealthCondition(dish.health_condition);
+    // First, check if the dish is generally safe for the profile's health conditions and allergens
+    if (!isDishSafeForProfile(profile, dish)) {
+      return false;
+    }
 
     const dishGoals = Array.isArray(dish.goal) ? dish.goal.map((g) => g.toLowerCase().trim()) : [];
     const dishDietary = Array.isArray(dish.dietary) ? dish.dietary.map((d) => d.toLowerCase().trim()) : [];
-
     const dishName = (dish.name || "").toLowerCase();
-    const dishDescription = (dish.description || "").toLowerCase();
-
-    const hasAllergen = userAllergens.some(
-      (ua) =>
-        dishAllergens.includes(ua) ||
-        dishIngredients.includes(ua) ||
-        dishIngredients.some((i) => i.includes(ua)) ||
-        dishName.includes(ua) ||
-        dishDescription.includes(ua)
-    );
-    if (hasAllergen) return false;
-
-    if (userHealthConditions.some((hc) => dishHealth.includes(hc))) return false;
+    const dishIngredients = (dish.ingredients_dish_id_fkey || [])
+      .map((i) => i.name?.toLowerCase().trim() || "");
 
     if (
       userEatingStyle &&
@@ -646,14 +684,16 @@ export const createSmartWeeklyMealPlan = (profile, dishes) => {
     return topCandidates[randomIndex];
   };
 
-  const chooseCandidate = (pool, dayIndex) => {
+  const chooseCandidate = (pool, dayIndex, usedToday = new Set()) => {
     if (!pool?.length) return null;
+
+    const filteredPool = pool.filter(p => !usedToday.has(String(p.id)));
 
     // First pass: strict adherence to repetition rules
     // Collect all valid candidates, then randomly select from top ones
     const validCandidates = [];
-    for (let i = 0; i < pool.length; i++) {
-      const candidate = pool[i];
+    for (let i = 0; i < filteredPool.length; i++) {
+      const candidate = filteredPool[i];
       const id = String(candidate.id);
       const usedCount = usedHistory.counts[id] || 0;
       if (usedCount >= maxRepeatsPerWeek) continue;
@@ -671,8 +711,8 @@ export const createSmartWeeklyMealPlan = (profile, dishes) => {
 
     // Second pass: Relax minDaysBetweenSameDish, but still respect maxRepeatsPerWeek
     const relaxedCandidates = [];
-    for (let i = 0; i < pool.length; i++) {
-      const candidate = pool[i];
+    for (let i = 0; i < filteredPool.length; i++) {
+      const candidate = filteredPool[i];
       const id = String(candidate.id);
       const usedCount = usedHistory.counts[id] || 0;
       if (usedCount >= maxRepeatsPerWeek) continue;
@@ -687,7 +727,7 @@ export const createSmartWeeklyMealPlan = (profile, dishes) => {
 
     // Third pass: Relax maxRepeatsPerWeek, take from least used candidates
     // Sort by least used count, then score, then add randomization
-    const sortedByLeastUsed = [...pool].sort((a, b) => {
+    const sortedByLeastUsed = [...filteredPool].sort((a, b) => {
       const aUsed = usedHistory.counts[String(a.id)] || 0;
       const bUsed = usedHistory.counts[String(b.id)] || 0;
       if (aUsed !== bUsed) return aUsed - bUsed;
@@ -696,6 +736,15 @@ export const createSmartWeeklyMealPlan = (profile, dishes) => {
     
     const selected = selectFromTopCandidates(sortedByLeastUsed, 3);
     log("chooseCandidateRelaxedAll", { dayIndex, chosenId: selected?.id });
+    
+    // Final fallback: If all else fails, pick any safe dish from the pool, ignoring all repetition constraints
+    // This ensures a dish is always selected and isDishSafeForProfile should not find a "Meal not found"
+    if (!selected && filteredPool.length > 0) {
+      const fallbackSelected = selectFromTopCandidates(filteredPool, 1); // Pick the top scoring one from the full pool
+      log("chooseCandidateFallback", { dayIndex, chosenId: fallbackSelected?.id });
+      return fallbackSelected;
+    }
+
     return selected;
   };
 
@@ -819,9 +868,9 @@ export const createSmartWeeklyMealPlan = (profile, dishes) => {
   };
 
   // pick function similar to original but uses chooseCandidate
-  const selectMealForType = (type, poolsMap, dayIdx) => {
+  const selectMealForType = (type, poolsMap, dayIdx, usedToday) => {
     const pool = poolsMap[type] || [];
-    const candidate = chooseCandidate(pool, dayIdx);
+    const candidate = chooseCandidate(pool, dayIdx, usedToday);
     if (!candidate) {
       return { name: "Meal not found", ingredients: [] };
     }
@@ -860,21 +909,27 @@ export const createSmartWeeklyMealPlan = (profile, dishes) => {
     ).padStart(2, "0")}-${String(currentDate.getDate()).padStart(2, "0")}`;
 
     const dayPlan = { day: `Day ${dayIdx + 1}`, date: dateISO, meals: [] };
+    const usedToday = new Set();
 
     // primary meals
-    const breakfast = selectMealForType("Breakfast", poolsMap, dayIdx);
-    const lunch = selectMealForType("Lunch", poolsMap, dayIdx);
-    const dinner = selectMealForType("Dinner", poolsMap, dayIdx);
-
+    const breakfast = selectMealForType("Breakfast", poolsMap, dayIdx, usedToday);
+    if (breakfast.id) usedToday.add(String(breakfast.id));
     dayPlan.meals.push({ type: "Breakfast", ...breakfast });
+
+    const lunch = selectMealForType("Lunch", poolsMap, dayIdx, usedToday);
+    if (lunch.id) usedToday.add(String(lunch.id));
     dayPlan.meals.push({ type: "Lunch", ...lunch });
+
+    const dinner = selectMealForType("Dinner", poolsMap, dayIdx, usedToday);
+    if (dinner.id) usedToday.add(String(dinner.id));
     dayPlan.meals.push({ type: "Dinner", ...dinner });
 
     // optional snacks based on mealsPerDay
     if (mealsPerDay > 3) {
       const extraSnacks = mealsPerDay - 3;
       for (let s = 0; s < extraSnacks; s++) {
-        const snack = selectMealForType("Snack", poolsMap, dayIdx + s);
+        const snack = selectMealForType("Snack", poolsMap, dayIdx + s, usedToday);
+        if (snack.id) usedToday.add(String(snack.id));
         dayPlan.meals.push({ type: "Snack", ...snack });
       }
     }

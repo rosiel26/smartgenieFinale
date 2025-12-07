@@ -10,6 +10,7 @@ import {
   getBoholCities,
   recommendStoresForIngredients,
 } from "../services/storeService";
+import { logMealAndGetSuggestion } from "../services/mealService";
 
 // Custom Modal Component
 function CustomModal({ isOpen, onClose, title, children, actions }) {
@@ -23,14 +24,14 @@ function CustomModal({ isOpen, onClose, title, children, actions }) {
           exit={{ opacity: 0 }}
         >
           <motion.div
-            className="bg-white rounded-3xl shadow-2xl w-11/12 max-w-md p-6"
+            className="bg-white rounded-3xl shadow-2xl w-11/12 max-w-xs p-3"
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.9, opacity: 0 }}
           >
             {/* Header */}
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold text-black">{title}</h2>
+            <div className="flex justify-between items-center mb-3">
+              <h2 className="text-base font-bold text-black">{title}</h2>
               <button
                 onClick={onClose}
                 className="text-black bg-lime-200 hover:bg-lime-300 rounded-full p-1 transition"
@@ -40,16 +41,16 @@ function CustomModal({ isOpen, onClose, title, children, actions }) {
             </div>
 
             {/* Body */}
-            <div className="text-gray-700 text-sm space-y-4">{children}</div>
+            <div className="text-gray-700 text-sm space-y-3">{children}</div>
 
             {/* Actions */}
             {actions && (
-              <div className="mt-6 flex justify-end gap-3">
+              <div className="mt-4 flex justify-end gap-2">
                 {actions.map((action, idx) => (
                   <button
                     key={idx}
                     onClick={action.onClick}
-                    className={`px-4 py-2 rounded-xl font-semibold transition ${
+                    className={`px-3 py-2 rounded-lg font-semibold transition text-sm ${
                       action.variant === "primary"
                         ? "bg-lime-600 text-white hover:bg-lime-700"
                         : "bg-gray-200 text-black hover:bg-gray-300"
@@ -90,7 +91,13 @@ export default function ResultPage() {
   const [showMealTypeModal, setShowMealTypeModal] = useState(false);
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [alertMessage, setAlertMessage] = useState("");
-  
+  const [profile, setProfile] = useState(null);
+  const [mealLog, setMealLog] = useState([]);
+  const [showExceedModal, setShowExceedModal] = useState(false);
+  const [exceedMessage, setExceedMessage] = useState("");
+  const [skipExceedCheck, setSkipExceedCheck] = useState(false);
+  const [pendingMealType, setPendingMealType] = useState(null);
+
   const fileInputRef = useRef(null);
 
   const servingOptions = [
@@ -135,6 +142,29 @@ export default function ResultPage() {
     fetchDish();
   }, [fetchDish]);
 
+  useEffect(() => {
+    const fetchProfileAndMeals = async () => {
+      if (!isLoggedIn) return;
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const [profileRes, mealsRes] = await Promise.all([
+        supabase
+          .from("health_profiles")
+          .select("*")
+          .eq("user_id", user.id)
+          .single(),
+        supabase.from("meal_logs").select("*").eq("user_id", user.id),
+      ]);
+
+      if (profileRes.data) setProfile(profileRes.data);
+      if (mealsRes.data) setMealLog(mealsRes.data);
+    };
+    fetchProfileAndMeals();
+  }, [isLoggedIn]);
+
   // Hide scrollbar on this page
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -176,23 +206,79 @@ export default function ResultPage() {
     const logDate = `${today.getFullYear()}-${String(
       today.getMonth() + 1
     ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-    const mealLogData = {
-      user_id: user.id,
-      dish_uuid: dish.id,
-      dish_name: dish.name,
-      meal_date: logDate,
+
+    const adjustedTotals = {
       calories: Number(getNutritionValue(dish.calories)),
       protein: Number(getNutritionValue(dish.protein)),
       carbs: Number(getNutritionValue(dish.carbs)),
       fat: Number(getNutritionValue(dish.fat)),
+    };
+
+    if (!skipExceedCheck) {
+      // Check if adding this meal would exceed daily macro targets
+      const currentDayMeals = mealLog.filter((m) => m.meal_date === logDate);
+      const currentTotals = currentDayMeals.reduce(
+        (totals, m) => ({
+          carbs: totals.carbs + (m.carbs || 0),
+          protein: totals.protein + (m.protein || 0),
+          fat: totals.fat + (m.fat || 0),
+        }),
+        { carbs: 0, protein: 0, fat: 0 }
+      );
+
+      const projectedTotals = {
+        carbs: currentTotals.carbs + adjustedTotals.carbs,
+        protein: currentTotals.protein + adjustedTotals.protein,
+        fat: currentTotals.fat + adjustedTotals.fats,
+      };
+
+      let exceedMsg = "";
+      const projectedCalories =
+        currentTotals.calories + adjustedTotals.calories;
+      if (projectedCalories > (profile?.calorie_needs || 0)) {
+        exceedMsg =
+          "You've gone over your calorie target for today. That's okay — staying aware is what matters. Consider lighter portions for your next meal.";
+      } else if (projectedTotals.carbs > (profile?.carbs_needed || 0)) {
+        exceedMsg =
+          "You've gone over your carbohydrate target for today. That's okay — staying aware is what matters. Consider focusing on lower-carb options for your next meal.";
+      } else if (projectedTotals.protein > (profile?.protein_needed || 0)) {
+        exceedMsg =
+          "You've gone over your protein target for today. That's okay — staying aware is what matters. You might balance it with lighter protein sources for your next meal.";
+      } else if (projectedTotals.fat > (profile?.fats_needed || 0)) {
+        exceedMsg =
+          "You've gone over your fat target for today. That's okay — staying aware is what matters. Try choosing lighter-fat foods for your next meal.";
+      }
+
+      if (exceedMsg) {
+        setExceedMessage(exceedMsg);
+        setPendingMealType(mealType);
+        setShowExceedModal(true);
+        return;
+      }
+    } else {
+      setSkipExceedCheck(false);
+    }
+
+    // Proceed with adding the meal
+    const mealLogData = {
+      dish_uuid: dish.id, // This page uses UUID
+      dish_name: dish.name,
+      meal_date: logDate,
+      calories: adjustedTotals.calories,
+      protein: adjustedTotals.protein,
+      carbs: adjustedTotals.carbs,
+      fat: adjustedTotals.fat,
       meal_type: mealType.toLowerCase(),
     };
-    const { error } = await supabase.from("meal_logs").insert([mealLogData]);
 
-    if (error) setAlertMessage(`Failed to add meal: ${error.message}`);
-    else setAlertMessage(`${dish.name} added to ${mealType}!`);
+    const { success, suggestion } = await logMealAndGetSuggestion(mealLogData);
+
+    if (success) {
+      setAlertMessage(`${dish.name} added to ${mealType}! ${suggestion}`);
+    } else {
+      setAlertMessage(suggestion || `Failed to add meal.`);
+    }
     setShowAlertModal(true);
-    setTimeout(() => setShowAlertModal(false), 1000);
   };
 
   const handleSubmitFeedback = async () => {
@@ -240,7 +326,7 @@ export default function ResultPage() {
       navigate("/analyze", { state: { image: base64Image } });
     };
     reader.readAsDataURL(file);
-    
+
     // Reset input so the same file can be selected again
     e.target.value = "";
   };
@@ -266,11 +352,13 @@ export default function ResultPage() {
           accept="image/*"
           className="hidden"
         />
-        
+
         {/* Floating Scan Again Button */}
         <motion.button
           onClick={() => fileInputRef.current?.click()}
-          className={`absolute right-4 ${isLoggedIn ? 'bottom-20' : 'bottom-4'} z-40 bg-lime-600 hover:bg-lime-700 text-white p-4 rounded-full shadow-lg transition-all hover:scale-110`}
+          className={`absolute right-4 ${
+            isLoggedIn ? "bottom-20" : "bottom-4"
+          } z-40 bg-lime-600 hover:bg-lime-700 text-white p-4 rounded-full shadow-lg transition-all hover:scale-110`}
           initial={{ scale: 0, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.3, type: "spring", stiffness: 200 }}
@@ -300,9 +388,9 @@ export default function ResultPage() {
             <h1 className="text-2xl font-bold text-black">{dish.name}</h1>
             <button
               onClick={() => setShowFeedbackModal(true)}
-              className="bg-lime-500 p-3 rounded-full shadow hover:bg-lime-600 transition"
+              className="bg-lime-500 p-2 rounded-full shadow hover:bg-lime-600 transition"
             >
-              <FiMessageCircle className="text-white w-6 h-6" />
+              <FiMessageCircle className="text-white w-5 h-5" />
             </button>
           </div>
 
@@ -315,7 +403,7 @@ export default function ResultPage() {
               {dish.description.length > 120 && (
                 <button
                   onClick={() => setShowFullDescription(!showFullDescription)}
-                  className="text-lime-600 font-medium ml-1"
+                  className="text-lime-600 font-medium ml-1 hover:underline"
                 >
                   {showFullDescription ? "Show less" : "Show more"}
                 </button>
@@ -323,14 +411,20 @@ export default function ResultPage() {
             </p>
           )}
 
+          {/* Disclaimer */}
+          <p className="text-xs text-gray-600 text-center bg-lime-50 p-2 rounded-lg">
+            All macro values are estimates generated from your input and may
+            vary depending on actual ingredients and serving sizes.
+          </p>
+
           {/* Nutrition */}
-          <div className="bg-lime-50 border border-lime-300 rounded-2xl p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-black">Serving</span>
+          <div className="bg-lime-50 border border-lime-300 rounded-2xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="font-semibold text-black text-sm">Serving</span>
               <select
                 value={selectedServing}
                 onChange={(e) => setSelectedServing(e.target.value)}
-                className="border border-lime-300 px-2 py-1 rounded text-black text-sm"
+                className="border border-lime-300 px-1 py-0.5 rounded text-black text-xs bg-white"
               >
                 {servingOptions.map((s) => (
                   <option key={s.label} value={s.label}>
@@ -340,40 +434,72 @@ export default function ResultPage() {
               </select>
             </div>
 
-            {[
-              { label: "Calories", value: dish.calories, color: "bg-lime-500" },
-              { label: "Protein", value: dish.protein, color: "bg-black" },
-              { label: "Fat", value: dish.fat, color: "bg-lime-700" },
-              { label: "Carbs", value: dish.carbs, color: "bg-lime-300" },
-            ].map(({ label, value, color }) => (
-              <div key={label} className="space-y-1">
-                <div className="flex justify-between items-center text-sm font-medium text-black">
-                  <span>{label}</span>
-                  <span>{getNutritionValue(value)}</span>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                {
+                  label: "Calories",
+                  value: dish.calories,
+                  color: "bg-lime-500",
+                  icon: "🔥",
+                  border: "border-lime-400",
+                },
+                {
+                  label: "Protein",
+                  value: dish.protein,
+                  color: "bg-black",
+                  icon: "💪",
+                  border: "border-pink-400",
+                },
+                {
+                  label: "Fat",
+                  value: dish.fat,
+                  color: "bg-lime-700",
+                  icon: "🧈",
+                  border: "border-orange-400",
+                },
+                {
+                  label: "Carbs",
+                  value: dish.carbs,
+                  color: "bg-lime-300",
+                  icon: "🍞",
+                  border: "border-violet-400",
+                },
+              ].map(({ label, value, color, icon, border }) => (
+                <div
+                  key={label}
+                  className={`border ${border} rounded-lg p-2 text-center`}
+                >
+                  <div className="text-lg mb-1">{icon}</div>
+                  <div className="text-black text-sm font-medium mb-1">
+                    {label}
+                  </div>
+                  <div className="font-bold text-lime-600 text-sm mb-2">
+                    {getNutritionValue(value)}
+                  </div>
+                  <div className="w-full h-2 bg-lime-200 rounded">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{
+                        width: `${Math.min(
+                          (getNutritionValue(value) / 300) * 100,
+                          100
+                        )}%`,
+                      }}
+                      className={`h-2 rounded ${color}`}
+                    />
+                  </div>
                 </div>
-                <div className="w-full h-2 bg-lime-200 rounded">
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{
-                      width: `${Math.min(
-                        (getNutritionValue(value) / 300) * 100,
-                        100
-                      )}%`,
-                    }}
-                    className={`h-2 rounded ${color}`}
-                  />
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
 
           {/* Ingredients Table */}
           {ingredientList.length > 0 && (
             <div className="overflow-x-auto border border-lime-300 rounded-2xl p-4 bg-white shadow-sm">
               <h2 className="font-semibold text-black mb-3">Ingredients</h2>
-              <table className="min-w-full text-sm text-left text-black">
-                <thead>
-                  <tr className="bg-lime-100">
+              <table className="min-w-full text-sm text-left text-black border-collapse">
+                <thead className="bg-lime-200">
+                  <tr>
                     <th className="px-4 py-2 font-medium">#</th>
                     <th className="px-4 py-2 font-medium">Ingredient</th>
                   </tr>
@@ -382,7 +508,9 @@ export default function ResultPage() {
                   {ingredientList.map((ingredient, idx) => (
                     <tr
                       key={idx}
-                      className={idx % 2 === 0 ? "bg-lime-50" : "bg-white"}
+                      className={`border-t border-lime-400 ${
+                        idx % 2 === 0 ? "bg-white" : "bg-lime-50"
+                      }`}
                     >
                       <td className="px-4 py-2">{idx + 1}</td>
                       <td className="px-4 py-2">{ingredient.name}</td>
@@ -395,15 +523,15 @@ export default function ResultPage() {
 
           {/* Stores */}
           {ingredientList.length > 0 && (
-            <div className="border border-lime-300 rounded-2xl p-4 space-y-3">
+            <div className="border border-lime-300 rounded-2xl p-4 space-y-3 bg-white">
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-black">
-                  Where to buy (Bohol)
+                <span className="font-semibold text-black text-base">
+                  Where to Buy (Bohol)
                 </span>
                 <select
                   value={selectedCityId}
                   onChange={(e) => setSelectedCityId(e.target.value)}
-                  className="border border-lime-300 px-2 py-1 rounded text-black text-sm"
+                  className="border border-lime-300 px-2 py-1 rounded text-black text-sm bg-white"
                 >
                   {boholCities.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -412,31 +540,43 @@ export default function ResultPage() {
                   ))}
                 </select>
               </div>
-              {storeRecommendations.map((rec) => (
-                <div
-                  key={rec.ingredient.name}
-                  className="border border-lime-200 rounded p-2"
-                >
-                  <p className="font-medium text-black">
-                    {rec.ingredient.name}
-                  </p>
-                  {rec.stores.length > 0 ? (
-                    <ul className="list-disc list-inside text-sm text-gray-700">
-                      {rec.stores.map((s) => (
-                        <li key={s.id}>
-                          {s.name} (
-                          {s.type === "public_market"
-                            ? "Public Market"
-                            : "Supermarket"}
-                          ){s.address && ` - ${s.address}`}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-xs text-gray-400">No stores found</p>
-                  )}
-                </div>
-              ))}
+              <div className="space-y-2">
+                {storeRecommendations.map((rec) => (
+                  <div
+                    key={rec.ingredient.name}
+                    className="border border-lime-200 rounded-lg p-3 bg-white"
+                  >
+                    <p className="font-medium text-black mb-2">
+                      {rec.ingredient.name}
+                    </p>
+                    {rec.stores.length > 0 ? (
+                      <ul className="text-sm text-black list-disc list-inside space-y-1">
+                        {rec.stores.map((s) => (
+                          <li key={s.id}>
+                            <span className="font-medium">{s.name}</span>
+                            <span className="ml-2 text-xs text-lime-600">
+                              (
+                              {s.type === "public_market"
+                                ? "Public Market"
+                                : "Supermarket"}
+                              )
+                            </span>
+                            {s.address && (
+                              <span className="ml-2 text-xs text-lime-700">
+                                - {s.address}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-lime-600">
+                        No suggestions for this city.
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -461,6 +601,40 @@ export default function ResultPage() {
           onClose={() => setShowMealTypeModal(false)}
           onSelectMealType={handleAddMeal}
         />
+
+        {/* Exceed Modal */}
+        {showExceedModal && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[1000]">
+            <div className="bg-black text-lime-400 w-[320px] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 border border-lime-400">
+              <h2 className="text-lg font-bold text-lime-300">
+                Macro Target Exceeded
+              </h2>
+              <p className="text-sm text-lime-400">{exceedMessage}</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowExceedModal(false);
+                    setSkipExceedCheck(true);
+                    handleAddMeal(pendingMealType);
+                    setPendingMealType(null);
+                  }}
+                  className="flex-1 bg-lime-400 hover:bg-lime-500 text-black font-semibold py-2 rounded-lg transition"
+                >
+                  Continue
+                </button>
+                <button
+                  onClick={() => {
+                    setShowExceedModal(false);
+                    setPendingMealType(null);
+                  }}
+                  className="flex-1 bg-black border border-red-500 text-red-500 hover:bg-red-900 font-medium py-2 rounded-lg transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Alert Modal */}
         {showAlertModal && (
@@ -492,7 +666,7 @@ export default function ResultPage() {
             value={feedbackText}
             onChange={(e) => setFeedbackText(e.target.value)}
             className="w-full border border-lime-300 rounded p-2 text-sm focus:ring-2 focus:ring-lime-400 outline-none"
-            rows={4}
+            rows={3}
             placeholder="Your feedback..."
           />
         </CustomModal>

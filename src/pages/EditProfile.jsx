@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import { supabase } from "../supabaseClient";
 import { useNavigate } from "react-router-dom";
 import { FiArrowLeft, FiSave } from "react-icons/fi";
+import ConfirmationModal from "../components/ConfirmationModal";
 import {
   calculateBMR,
   getActivityMultiplier,
@@ -95,7 +96,9 @@ const TagSelector = ({ options, selected, name, handleMultiSelect }) => {
 
 export default function EditProfile() {
   const [profile, setProfile] = useState(null);
+  const [originalProfile, setOriginalProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const navigate = useNavigate();
 
   // --- Options ---
@@ -201,6 +204,7 @@ export default function EditProfile() {
         }
 
         setProfile(profileData);
+        setOriginalProfile(JSON.parse(JSON.stringify(profileData)));
       }
       setLoading(false);
     })();
@@ -268,6 +272,17 @@ export default function EditProfile() {
   // --- Save ---
   const handleSave = async (e) => {
     e.preventDefault();
+    // Check if profile has changed
+    if (JSON.stringify(profile) === JSON.stringify(originalProfile)) {
+      // No changes, save directly
+      confirmSave();
+    } else {
+      // Changes made, show confirmation
+      setIsModalOpen(true);
+    }
+  };
+
+  const confirmSave = async () => {
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -317,8 +332,22 @@ export default function EditProfile() {
       .update(updatedProfile)
       .eq("user_id", user.id);
 
-    if (error) console.error("Update failed:", error);
-    else navigate("/personaldashboard");
+    if (error) {
+      console.error("Update failed:", error);
+      alert("Failed to update profile. Please try again.");
+    } else {
+      // Signal other parts of the app that the profile was updated so
+      // components (like the meal planner) can refresh generated plans.
+      try {
+        localStorage.setItem("profileUpdatedAt", String(Date.now()));
+        // Also dispatch an in-page event for immediate listeners.
+        window.dispatchEvent(new Event("profileUpdated"));
+      } catch (e) {
+        console.error("Could not signal profile update:", e);
+      }
+
+      navigate("/personaldashboard");
+    }
   };
 
   if (loading)
@@ -472,6 +501,13 @@ export default function EditProfile() {
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
+
+      <ConfirmationModal
+        show={isModalOpen}
+        message="Saving these changes will regenerate your meal plan. Are you sure you want to continue?"
+        onConfirm={confirmSave}
+        onCancel={() => setIsModalOpen(false)}
+      />
     </div>
   );
 }

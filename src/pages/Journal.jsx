@@ -33,7 +33,7 @@ export default function Journal() {
   const [isMultiDeleteMode, setIsMultiDeleteMode] = useState(false);
   const [selectedDay, setSelectedDay] = useState(new Date());
   const [mealTypeFilter, setMealTypeFilter] = useState("");
-  const ITEMS_PER_PAGE = 6;
+  const ITEMS_PER_PAGE = 4;
   const [logPage, setLogPage] = useState(0);
 
   // Fetch data
@@ -79,6 +79,7 @@ export default function Journal() {
     setIsMultiDeleteMode(false);
     setSelectedMealLogs([]);
     setSelectedWorkoutLogs([]);
+    setLogPage(0); // Reset pagination when filters change
   }, [selectedDay, mealTypeFilter]);
 
   useEffect(() => {
@@ -294,7 +295,7 @@ export default function Journal() {
         </div>
 
         {/* Scrollable content area */}
-        <div className="p-4 flex-1 space-y-5 overflow-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div className="p-4 flex-1 space-y-5 overflow-auto pb-24 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {/* Filters */}
 
           <div className="grid grid-cols-2 gap-4 w-full max-w-4xl mx-auto">
@@ -440,10 +441,14 @@ export default function Journal() {
             </button>
           </div>
 
+          <h3 className="text-black font-semibold text-sm">
+            Meal & Workout Logged
+          </h3>
+
           {/* Logs */}
           <MealAndWorkoutLogs
-            mealLogs={paginatedMealLogs}
-            workoutLogs={paginatedWorkoutLogs}
+            mealLogs={filteredMealLogs}
+            workoutLogs={filteredWorkoutLogs}
             onDeleteMeal={(id) =>
               setDeleteConfirm({ show: true, type: "meal", idsToDelete: [id] })
             }
@@ -464,6 +469,8 @@ export default function Journal() {
             filteredMealLogs={filteredMealLogs}
             filteredWorkoutLogs={filteredWorkoutLogs}
           />
+
+          {/* (Show more handled inside MealAndWorkoutLogs) */}
         </div>
 
         {/* Fixed Footer */}

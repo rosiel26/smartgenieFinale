@@ -1,4 +1,11 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, {
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "../supabaseClient";
 import { useNavigate } from "react-router-dom";
 import FooterNav from "../components/FooterNav";
@@ -9,6 +16,7 @@ import {
 import MealPlanGrid from "../components/MealPlanGrid";
 import DishDetailModal from "../components/DishDetailModal";
 import AlertModal from "../components/AlertModal";
+import SuccessModal from "../components/SuccessModal";
 import NoProfile from "../components/NoProfile";
 import MealPlanLoader from "../components/MealPlanLoader";
 import {
@@ -17,7 +25,10 @@ import {
   prepareDishForModal,
   computeDishTotalsWithIngredientOverrides,
   formatDateRange,
+  isDishSafeForProfile, // NEW
+  identifyUnsafeMeals, // NEW
 } from "../utils/mealplan";
+import { logMealAndGetSuggestion, combineMeals } from "../services/mealService";
 import { FaInfoCircle } from "react-icons/fa";
 
 export default function Mealplan({ userId }) {
@@ -29,14 +40,158 @@ export default function Mealplan({ userId }) {
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false); // NEW
   const [alertMessage, setAlertMessage] = useState("");
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [selectedDish, setSelectedDish] = useState(null);
   const [selectedCityId, setSelectedCityId] = useState("tagbilaran");
   const [storeTypeFilters, setStoreTypeFilters] = useState([]);
   const [timeOfDay, setTimeOfDay] = useState("");
   const [boholCities, setBoholCities] = useState([]);
   const [storeRecommendations, setStoreRecommendations] = useState([]);
+  const [profileUpdatedSignal, setProfileUpdatedSignal] = useState(0);
+  const [showCombineModal, setShowCombineModal] = useState(false);
+  const [duplicateMealInfo, setDuplicateMealInfo] = useState(null);
+  const [showExceedModal, setShowExceedModal] = useState(false);
+  const [exceedMessage, setExceedMessage] = useState("");
+  const [skipExceedCheck, setSkipExceedCheck] = useState(false);
 
   const navigate = useNavigate();
+
+  const triggerProfileRefetch = useCallback(() => {
+    setProfileUpdatedSignal((prev) => prev + 1);
+  }, []);
+
+  // Build a minimal profile snapshot used to detect when a saved plan
+  // was generated from a different profile. Keep values normalized so
+  // comparisons are stable across ordering/formatting differences.
+  const buildProfileSnapshot = (p) => {
+    if (!p) return {};
+    const normalizeArr = (a) =>
+      Array.isArray(a)
+        ? [...a]
+            .map(String)
+            .map((s) => s.toLowerCase().trim())
+            .sort()
+        : [];
+    return {
+      allergens: normalizeArr(p.allergens),
+      health_conditions: normalizeArr(p.health_conditions),
+      goal: normalizeArr(
+        Array.isArray(p.goal)
+          ? p.goal
+          : typeof p.goal === "string"
+          ? p.goal.split(",")
+          : []
+      ),
+      eating_style: (p.eating_style || "").toLowerCase().trim(),
+      timeframe: Number(p.timeframe) || 7,
+      meals_per_day: Number(p.meals_per_day) || 3,
+      max_weekly_repeats: Number(p.max_weekly_repeats) || null,
+      min_days_between_same_dish: Number(p.min_days_between_same_dish) || null,
+      activity_level: (p.activity_level || "").toLowerCase().trim(),
+      calorie_needs: Number(p.calorie_needs) || 0,
+      protein_needed: Number(p.protein_needed) || 0,
+    };
+  };
+
+  // Ensure logged meals are preserved as immutable 'added' entries in the plan.
+  // This replaces the scheduled meal for the given date+meal_type with the
+  // logged meal (using dish info from `dishes` when available) so regenerating
+  // the plan won't overwrite already-eaten/added meals.
+  const preserveLoggedMeals = (
+    planObj,
+    mealLogArray = [],
+    dishesArray = []
+  ) => {
+    if (!planObj || !Array.isArray(planObj.plan)) return planObj;
+    if (!Array.isArray(mealLogArray) || mealLogArray.length === 0)
+      return planObj;
+
+    // Build quick lookup for dishes by id
+    const dishById = (dishesArray || []).reduce((acc, d) => {
+      acc[String(d.id)] = d;
+      return acc;
+    }, {});
+
+    const newPlan = {
+      ...planObj,
+      plan: planObj.plan.map((day) => {
+        const dayCopy = { ...day };
+        const logsForDay = mealLogArray.filter((m) => m.meal_date === day.date);
+        if (!logsForDay.length) return dayCopy;
+
+        const mealsCopy = (dayCopy.meals || []).map((m) => ({ ...m }));
+
+        for (const log of logsForDay) {
+          const mealType = log.meal_type || log.meal_type || "unknown";
+          const idx = mealsCopy.findIndex((mm) => mm.type === mealType);
+          const loggedDish = dishById[String(log.dish_id)];
+          const replacement = loggedDish
+            ? {
+                ...loggedDish,
+                id: log.dish_id,
+                name: log.dish_name || loggedDish.name,
+                image_url: loggedDish.image_url,
+                ingredients_dish_id_fkey:
+                  loggedDish.ingredients_dish_id_fkey || [],
+                status: "added",
+              }
+            : {
+                id: log.dish_id,
+                name: log.dish_name || "Logged Meal",
+                image_url: null,
+                ingredients_dish_id_fkey: [],
+                status: "added",
+              };
+
+          // also attach nutrition if available from the log
+          if (typeof log.calories !== "undefined")
+            replacement.calories = log.calories;
+          if (typeof log.protein !== "undefined")
+            replacement.protein = log.protein;
+          if (typeof log.carbs !== "undefined") replacement.carbs = log.carbs;
+          if (typeof log.fat !== "undefined") replacement.fat = log.fat;
+
+          if (idx >= 0) {
+            mealsCopy[idx] = { ...mealsCopy[idx], ...replacement };
+          } else {
+            // If no matching meal slot exists, optionally push it
+            mealsCopy.push({ type: mealType, ...replacement });
+          }
+        }
+
+        dayCopy.meals = mealsCopy;
+        return dayCopy;
+      }),
+    };
+    return newPlan;
+  };
+
+  const markMissedMeals = (planObj) => {
+    if (!planObj || !Array.isArray(planObj.plan)) return planObj;
+
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const newPlan = {
+      ...planObj,
+      plan: planObj.plan.map((day) => {
+        const dayCopy = { ...day };
+        const [year, month, dayOfMonth] = day.date.split("-").map(Number);
+        const mealDate = new Date(year, month - 1, dayOfMonth);
+
+        if (mealDate < today) {
+          dayCopy.meals = (dayCopy.meals || []).map((meal) => {
+            if (meal.status !== "added") {
+              return { ...meal, status: "missed" };
+            }
+            return meal;
+          });
+        }
+        return dayCopy;
+      }),
+    };
+    return newPlan;
+  };
 
   // -------------------- FETCH DATA --------------------
   const fetchData = useCallback(async () => {
@@ -56,7 +211,7 @@ export default function Mealplan({ userId }) {
         supabase.from("dishes").select(`
           id, name, description, default_serving, meal_type, goal,
           eating_style, health_condition, steps, image_url,
-          ingredients_dish_id_fkey(id, name, amount, unit, calories, protein, fats, carbs, is_rice)
+          ingredients_dish_id_fkey(id, name, amount, unit, calories, protein, fats, carbs, is_rice, allergen_id(id, name))
         `),
         supabase.from("meal_logs").select("*").eq("user_id", user.id),
       ]);
@@ -72,64 +227,138 @@ export default function Mealplan({ userId }) {
         return;
       }
 
+      // Ensure allergens and health_conditions are arrays
+      if (typeof profileData.allergens === "string") {
+        try {
+          profileData.allergens = JSON.parse(profileData.allergens);
+        } catch (e) {
+          profileData.allergens = [];
+        }
+      }
+      if (!Array.isArray(profileData.allergens)) {
+        profileData.allergens = [];
+      }
+      if (typeof profileData.health_conditions === "string") {
+        try {
+          profileData.health_conditions = JSON.parse(
+            profileData.health_conditions
+          );
+        } catch (e) {
+          profileData.health_conditions = [];
+        }
+      }
+      if (!Array.isArray(profileData.health_conditions)) {
+        profileData.health_conditions = [];
+      }
+
       setProfile(profileData);
       setDishes(dishesData);
       setMealLog(mealData);
 
       let plan = null;
       let shouldRegeneratePlan = false;
+      let planWasModified = false;
 
-      if (profileData.plan_start_date && profileData.plan_end_date) {
-        const savedPlanRaw = localStorage.getItem(`weeklyPlan_${user.id}`);
-        if (savedPlanRaw) {
-          plan = JSON.parse(savedPlanRaw);
+      // Check if profile was recently updated
+      try {
+        const profileUpdatedAt = localStorage.getItem("profileUpdatedAt");
+        if (profileUpdatedAt) {
+          shouldRegeneratePlan = true;
+          localStorage.removeItem("profileUpdatedAt");
+        }
+      } catch (e) {}
 
-          // Parse dates from the SAVED PLAN, not profile data, to avoid sync issues
-          // Use the plan's own start_date and end_date for consistency
-          const planStartStr = plan.start_date || profileData.plan_start_date;
-          const planEndStr = plan.end_date || profileData.plan_end_date;
-          
-          // Parse date strings consistently - extract year, month, day parts
-          const parseLocalDate = (dateStr) => {
-            if (!dateStr) return null;
-            // Handle both "YYYY-MM-DD" and ISO format "YYYY-MM-DDTHH:mm:ss.sssZ"
-            const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
-            if (match) {
-              return new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
-            }
-            return new Date(dateStr);
-          };
-          
-          const planStartDate = parseLocalDate(planStartStr);
-          const planEndDate = parseLocalDate(planEndStr);
-          
+      // Logic to get the plan
+      if (profileData.weekly_plan_json) {
+        try {
+          const supabasePlan = profileData.weekly_plan_json;
+          const planEndDate = new Date(supabasePlan.end_date);
           const now = new Date();
-          const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          const today = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate()
+          );
 
-          // Calculate duration using consistently parsed dates
-          const planDuration = planStartDate && planEndDate
-            ? Math.round((planEndDate.getTime() - planStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
-            : 0;
-
-          // Only regenerate if plan has expired OR duration doesn't match timeframe
-          if (planEndDate < today || Math.abs(planDuration - profileData.timeframe) > 1) {
+          if (planEndDate < today) {
+            // The plan is expired, so we should regenerate it.
             shouldRegeneratePlan = true;
-            plan = null;
+          } else {
+            plan = supabasePlan;
           }
-        } else {
+        } catch (e) {
+          console.error("Error parsing Supabase weekly_plan_json:", e);
           shouldRegeneratePlan = true;
         }
       } else {
         shouldRegeneratePlan = true;
       }
 
-      if (!plan || shouldRegeneratePlan) {
-        plan = createSmartWeeklyMealPlan(profileData, dishesData);
-        localStorage.setItem(`weeklyPlan_${user.id}`, JSON.stringify(plan));
+      // If no plan from Supabase, check local storage (but only if not regenerating)
+      if (!plan && !shouldRegeneratePlan) {
+        const savedPlanRaw = localStorage.getItem(`weeklyPlan_${user.id}`);
+        if (savedPlanRaw) {
+          try {
+            const localPlan = JSON.parse(savedPlanRaw);
+            const planEndDateLocal = new Date(localPlan.end_date);
+            const now = new Date();
+            const today = new Date(
+              now.getFullYear(),
+              now.getMonth(),
+              now.getDate()
+            );
 
-        const planStartISO = new Date(plan.start_date).toISOString();
-        const planEndISO = new Date(plan.end_date).toISOString();
-        const safePlanJSON = JSON.parse(JSON.stringify(plan));
+            if (planEndDateLocal < today) {
+              shouldRegeneratePlan = true; // Plan expired
+            } else {
+              plan = localPlan;
+            }
+          } catch (e) {
+            console.error("Error parsing local storage weeklyPlan:", e);
+            shouldRegeneratePlan = true;
+          }
+        } else {
+          shouldRegeneratePlan = true; // No plan anywhere
+        }
+      }
+
+      let finalPlanToProcess;
+
+      if (!plan || shouldRegeneratePlan) {
+        finalPlanToProcess = createSmartWeeklyMealPlan(profileData, dishesData);
+        planWasModified = true;
+      } else {
+        finalPlanToProcess = plan;
+      }
+
+      // Process the final plan
+      const planWithMissed = markMissedMeals(finalPlanToProcess);
+      const planWithAdded = markAddedMeals(planWithMissed, mealData);
+
+      // Check if marking meals as missed or added changed the plan
+      if (
+        JSON.stringify(planWithAdded) !== JSON.stringify(finalPlanToProcess)
+      ) {
+        planWasModified = true;
+      }
+
+      const planWithSnapshot = {
+        ...planWithAdded,
+        profile_snapshot: buildProfileSnapshot(profileData),
+      };
+
+      setWeeklyPlan(planWithSnapshot);
+      localStorage.setItem(
+        `weeklyPlan_${user.id}`,
+        JSON.stringify(planWithSnapshot)
+      );
+
+      if (planWasModified) {
+        const planStartISO = new Date(
+          planWithSnapshot.start_date
+        ).toISOString();
+        const planEndISO = new Date(planWithSnapshot.end_date).toISOString();
+        const safePlanJSON = JSON.parse(JSON.stringify(planWithSnapshot));
 
         const { error: updateError } = await supabase
           .from("health_profiles")
@@ -140,16 +369,14 @@ export default function Mealplan({ userId }) {
           })
           .eq("user_id", user.id);
 
-        if (updateError) 
-          console.error("Supabase update error:", updateError);
+        if (updateError)
+          console.error("Supabase update error (fetchData):", updateError);
       }
 
-      const updatedPlan = markAddedMeals(plan, mealData);
-      setWeeklyPlan(updatedPlan);
-      localStorage.setItem(
-        `weeklyPlan_${user.id}`,
-        JSON.stringify(updatedPlan)
-      );
+      // If plan was regenerated due to profile update, reload to display
+      if (shouldRegeneratePlan) {
+        window.location.reload();
+      }
     } catch (error) {
       console.error("Error fetching data:", error);
       setAlertMessage("An error occurred while loading your meal plan");
@@ -160,7 +387,7 @@ export default function Mealplan({ userId }) {
     } finally {
       setLoading(false);
     }
-  }, [navigate]);
+  }, [navigate, profileUpdatedSignal]);
 
   // -------------------- EFFECTS --------------------
   useEffect(() => {
@@ -196,23 +423,266 @@ export default function Mealplan({ userId }) {
     })();
   }, [selectedDish, selectedCityId, storeTypeFilters]);
 
-  // -------------------- AUTO-CLOSE ALERT --------------------
+  // -------------------- PROFILE UPDATE LISTENER --------------------
+  // When the user updates their profile elsewhere (EditProfile), we want
+  // to regenerate the meal plan automatically while preserving logged
+  // meals. The EditProfile page writes `profileUpdatedAt` to localStorage
+  // and dispatches a `profileUpdated` event.
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+  const dishesRef = useRef(dishes);
+  dishesRef.current = dishes;
+  const mealLogRef = useRef(mealLog);
+  mealLogRef.current = mealLog;
+
   useEffect(() => {
-    let fadeOutTimer;
+    let mounted = true;
 
-    if (showAlertModal) {
-      setAlertVisible(true); // fade in
+    const doRefreshPlan = async () => {
+      try {
+        const currentDishes = dishesRef.current;
+        const currentMealLog = mealLogRef.current;
 
-      fadeOutTimer = setTimeout(() => {
-        setAlertVisible(false); // fade out
-        setTimeout(() => setShowAlertModal(false), 500); // hide after transition
-      }, 1000); // visible for 3s
-    }
+        // Fetch the latest profile from Supabase to ensure we use fresh values
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data: freshProfileRow, error: profileErr } = await supabase
+          .from("health_profiles")
+          .select("*")
+          .eq("user_id", user.id)
+          .single();
 
-    return () => clearTimeout(fadeOutTimer);
-  }, [showAlertModal]);
+        if (profileErr) {
+          console.error("Failed to refetch profile after update:", profileErr);
+          return;
+        }
+
+        const freshProfile = { ...(freshProfileRow || {}) };
+        if (typeof freshProfile.allergens === "string") {
+          try {
+            freshProfile.allergens = JSON.parse(freshProfile.allergens);
+          } catch (e) {
+            freshProfile.allergens = [];
+          }
+        }
+        if (!Array.isArray(freshProfile.allergens)) freshProfile.allergens = [];
+        if (typeof freshProfile.health_conditions === "string") {
+          try {
+            freshProfile.health_conditions = JSON.parse(
+              freshProfile.health_conditions
+            );
+          } catch (e) {
+            freshProfile.health_conditions = [];
+          }
+        }
+        if (!Array.isArray(freshProfile.health_conditions))
+          freshProfile.health_conditions = [];
+
+        if (!currentDishes?.length) return;
+        setLoading(true);
+
+        // Generate a fresh plan based on the updated profile
+        const newPlan = createSmartWeeklyMealPlan(freshProfile, currentDishes);
+
+        const updatedPlan = preserveLoggedMeals(
+          newPlan,
+          currentMealLog,
+          currentDishes
+        );
+        const profileSnapshot = buildProfileSnapshot(freshProfile);
+        const planWithSnapshot = {
+          ...updatedPlan,
+          profile_snapshot: profileSnapshot,
+        };
+        setWeeklyPlan(planWithSnapshot);
+
+        // Persist to localStorage and to Supabase profile
+        localStorage.setItem(
+          `weeklyPlan_${user.id}`,
+          JSON.stringify(planWithSnapshot)
+        );
+
+        // Auto-refresh to ensure the new plan is displayed
+        window.location.reload();
+
+        try {
+          const planStartISO = new Date(
+            planWithSnapshot.start_date
+          ).toISOString();
+          const planEndISO = new Date(planWithSnapshot.end_date).toISOString();
+          const safePlanJSON = JSON.parse(JSON.stringify(planWithSnapshot));
+          const { error: updateError } = await supabase
+            .from("health_profiles")
+            .update({
+              plan_start_date: planStartISO,
+              plan_end_date: planEndISO,
+              weekly_plan_json: safePlanJSON,
+            })
+            .eq("user_id", user.id);
+          if (updateError)
+            console.error(
+              "Supabase update error (profile listener):",
+              updateError
+            );
+        } catch (e) {
+          console.error(
+            "Failed to persist updated plan after profile change:",
+            e
+          );
+        }
+
+        // Notify the user
+        setAlertMessage(
+          "Your meal plan has been updated based on your new profile. Logged meals have been preserved."
+        );
+        setShowAlertModal(true);
+      } catch (e) {
+        console.error("Error refreshing plan after profile update:", e);
+      } finally {
+        if (mounted) setLoading(false);
+        try {
+          // clear the profileUpdatedAt marker so we don't re-run unnecessarily
+          localStorage.removeItem("profileUpdatedAt");
+        } catch (e) {}
+      }
+    };
+
+    const handler = () => doRefreshPlan();
+
+    window.addEventListener("profileUpdated", handler);
+
+    // Also listen for cross-tab localStorage changes
+    const storageHandler = (e) => {
+      if (e.key === "profileUpdatedAt") handler();
+    };
+    window.addEventListener("storage", storageHandler);
+
+    // If a profileUpdatedAt exists on mount (user returned here), refresh
+    try {
+      const stamp = localStorage.getItem("profileUpdatedAt");
+      if (stamp) {
+        // Slight delay so other data loading can finish first
+        setTimeout(() => handler(), 300);
+      }
+    } catch (e) {}
+
+    return () => {
+      mounted = false;
+      window.removeEventListener("profileUpdated", handler);
+      window.removeEventListener("storage", storageHandler);
+    };
+  }, []);
 
   // -------------------- HANDLERS --------------------
+  const handleCombineMeals = async () => {
+    if (!duplicateMealInfo) return;
+
+    const { existingMeal, newMealData, mealDate } = duplicateMealInfo;
+    const result = await combineMeals(existingMeal, newMealData);
+
+    if (result.success) {
+      // Update meal log with the updated meal
+      setMealLog((prev) =>
+        prev.map((m) => (m.id === existingMeal.id ? result.updatedMeal : m))
+      );
+
+      // Update weekly plan with the updated nutrition
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      setWeeklyPlan((prev) => {
+        const newPlan = {
+          ...prev,
+          plan: prev.plan.map((day) => {
+            const dayCopy = { ...day };
+            if (dayCopy.date === mealDate) {
+              dayCopy.meals = dayCopy.meals.map((m) =>
+                Number(m.id) === Number(existingMeal.dish_id)
+                  ? { ...m, ...result.updatedMeal }
+                  : m
+              );
+            }
+            return dayCopy;
+          }),
+        };
+        if (user) {
+          localStorage.setItem(
+            `weeklyPlan_${user.id}`,
+            JSON.stringify(newPlan)
+          );
+        }
+        return newPlan;
+      });
+
+      setSelectedDish(null);
+      setShowSuccessModal(true);
+    } else {
+      setAlertMessage(
+        result.suggestion || "Failed to combine meals. Please try again."
+      );
+      setShowAlertModal(true);
+    }
+
+    setShowCombineModal(false);
+    setDuplicateMealInfo(null);
+  };
+
+  const handleAddSeparateMeal = async () => {
+    if (!duplicateMealInfo) return;
+
+    const {
+      newMealData,
+      meal,
+      mealType,
+      adjustedTotals,
+      servingSize,
+      mealDate,
+    } = duplicateMealInfo;
+
+    const result = await logMealAndGetSuggestion(newMealData, true); // forceAdd = true
+
+    if (result.success) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      setMealLog((prev) => [...(prev || []), result.newMeal]);
+
+      setWeeklyPlan((prev) => {
+        const newPlan = {
+          ...prev,
+          plan: prev.plan.map((day) => {
+            const dayCopy = { ...day };
+            if (dayCopy.date === mealDate) {
+              dayCopy.meals = dayCopy.meals.map((m) =>
+                Number(m.id) === Number(meal.id) &&
+                m.type === (meal.planMealType || meal.type)
+                  ? { ...m, status: "added" }
+                  : m
+              );
+            }
+            return dayCopy;
+          }),
+        };
+        localStorage.setItem(`weeklyPlan_${user.id}`, JSON.stringify(newPlan));
+        return newPlan;
+      });
+
+      setSelectedDish(null);
+      setShowSuccessModal(true);
+    } else {
+      setAlertMessage(
+        result.suggestion || "Failed to add meal. Please try again."
+      );
+      setShowAlertModal(true);
+    }
+
+    setShowCombineModal(false);
+    setDuplicateMealInfo(null);
+  };
+
   const handleOpenDish = (dish, date) => {
     const full = dishes.find((d) => d.id === dish.id) || dish;
     const prepared = prepareDishForModal(full);
@@ -272,33 +742,79 @@ export default function Mealplan({ userId }) {
             .toISOString()
             .split("T")[0];
 
-      const riceIngredient = (meal.ingredients_dish_id_fkey || []).find(
-        (ing) => ing.is_rice
+      // Proceed with adding the meal
+      await proceedWithAddMeal(
+        meal,
+        mealType,
+        adjustedTotals,
+        servingSize,
+        mealDate,
+        logDate,
+        user
       );
-      const riceAmount = riceIngredient?.amount;
-      const hasRice = riceAmount && Number(riceAmount) > 0; // only if > 0
-      const dishName = hasRice
-        ? `${meal.name || "Unknown Dish"} with rice`
-        : meal.name || "Unknown Dish";
+    } catch (error) {
+      console.error("Error adding meal:", error);
+      setAlertMessage("Failed to add meal. Please try again.");
+      setShowAlertModal(true);
+    }
+  };
 
-      const mealLogData = {
-        user_id: user.id,
-        dish_id: parseInt(meal.id),
-        dish_name: dishName,
-        meal_date: logDate,
-        calories: adjustedTotals.calories,
-        protein: adjustedTotals.protein,
-        carbs: adjustedTotals.carbs,
-        fat: adjustedTotals.fats,
-        meal_type: mealType || "unknown",
-        serving_label: `${servingSize} g`,
-        created_at: new Date().toISOString(),
-      };
+  const proceedWithAddMeal = async (
+    meal,
+    mealType,
+    adjustedTotals,
+    servingSize,
+    mealDate,
+    logDate,
+    user
+  ) => {
+    const riceIngredient = (meal.ingredients_dish_id_fkey || []).find(
+      (ing) => ing.is_rice
+    );
+    const riceAmount = riceIngredient?.amount;
+    const hasRice = riceAmount && Number(riceAmount) > 0; // only if > 0
 
-      const { error } = await supabase.from("meal_logs").insert([mealLogData]);
-      if (error) throw error;
+    // Normalize dish name by removing " with rice" if present
+    let baseName = meal.name || "Unknown Dish";
+    if (baseName.toLowerCase().endsWith(" with rice")) {
+      baseName = baseName.slice(0, -9).trim();
+    }
 
-      setMealLog((prev) => [...(prev || []), mealLogData]);
+    const dishName = hasRice ? `${baseName} with rice` : baseName;
+
+    const mealLogData = {
+      dish_id: parseInt(meal.id),
+      dish_name: dishName,
+      meal_date: logDate,
+      calories: adjustedTotals.calories,
+      protein: adjustedTotals.protein,
+      carbs: adjustedTotals.carbs,
+      fat: adjustedTotals.fats,
+      meal_type: mealType || "unknown",
+      serving_label: `${servingSize} g`,
+      created_at: new Date().toISOString(),
+    };
+
+    const result = await logMealAndGetSuggestion(mealLogData);
+
+    if (result.isDuplicate) {
+      // Show combine prompt
+      setDuplicateMealInfo({
+        existingMeal: result.existingMeal,
+        newMealData: result.newMealData,
+        meal,
+        mealType,
+        adjustedTotals,
+        servingSize,
+        mealDate,
+      });
+      setSelectedDish(null); // Close the dish detail modal
+      setShowCombineModal(true);
+      return;
+    }
+
+    if (result.success) {
+      setMealLog((prev) => [...(prev || []), result.newMeal]);
 
       setWeeklyPlan((prev) => {
         const newPlan = {
@@ -321,11 +837,11 @@ export default function Mealplan({ userId }) {
       });
 
       setSelectedDish(null);
-      setAlertMessage("Meal added successfully!");
-      setShowAlertModal(true);
-    } catch (error) {
-      console.error("Error adding meal:", error);
-      setAlertMessage("Failed to add meal. Please try again.");
+      setShowSuccessModal(true);
+    } else {
+      setAlertMessage(
+        result.suggestion || "Failed to add meal. Please try again."
+      );
       setShowAlertModal(true);
     }
   };
@@ -359,11 +875,15 @@ export default function Mealplan({ userId }) {
         Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
       );
       planEndDate.setUTCHours(0, 0, 0, 0);
-      if (planEndDate < today) return true;
+      if (planEndDate < today) return false;
     }
 
     for (const day of weeklyPlan.plan) {
-      if (day.meals.some((meal) => meal.status === "added")) {
+      if (
+        day.meals.some(
+          (meal) => meal.status === "added" || meal.status === "missed"
+        )
+      ) {
         return false;
       }
     }
@@ -387,11 +907,15 @@ export default function Mealplan({ userId }) {
     try {
       const newPlan = createSmartWeeklyMealPlan(profile, dishes);
 
-      // Mark already added meals
-      const updatedPlan = markAddedMeals(newPlan, mealLog);
+      // Preserve logged meals so they stay 'added' after regeneration
+      const preserved = preserveLoggedMeals(newPlan, mealLog, dishes);
 
       // Update state
-      setWeeklyPlan(updatedPlan);
+      const planWithSnapshot = {
+        ...preserved,
+        profile_snapshot: buildProfileSnapshot(profile),
+      };
+      setWeeklyPlan(planWithSnapshot);
 
       // Save to localStorage
       const {
@@ -400,13 +924,15 @@ export default function Mealplan({ userId }) {
       if (user) {
         localStorage.setItem(
           `weeklyPlan_${user.id}`,
-          JSON.stringify(updatedPlan)
+          JSON.stringify(planWithSnapshot)
         );
 
         // Update Supabase profile
-        const planStartISO = new Date(newPlan.start_date).toISOString();
-        const planEndISO = new Date(newPlan.end_date).toISOString();
-        const safePlanJSON = JSON.parse(JSON.stringify(newPlan));
+        const planStartISO = new Date(
+          planWithSnapshot.start_date
+        ).toISOString();
+        const planEndISO = new Date(planWithSnapshot.end_date).toISOString();
+        const safePlanJSON = JSON.parse(JSON.stringify(planWithSnapshot));
 
         const { error: updateError } = await supabase
           .from("health_profiles")
@@ -417,8 +943,7 @@ export default function Mealplan({ userId }) {
           })
           .eq("user_id", user.id);
 
-        if (updateError) 
-          console.error("Supabase update error:", updateError);
+        if (updateError) console.error("Supabase update error:", updateError);
       }
 
       setAlertMessage("Meal plan regenerated successfully!");
@@ -431,14 +956,13 @@ export default function Mealplan({ userId }) {
       setLoading(false);
     }
   };
-
   if (loading) return <MealPlanLoader timeframe={profile?.timeframe} />;
   if (!profile) return <NoProfile onNavigate={navigate} />;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-green-100 flex justify-center items-center p-4">
       <div className="bg-white w-[375px] h-[700px] rounded-3xl shadow-2xl overflow-hidden relative">
-        <div className="h-full overflow-auto pb-20">
+        <div className="h-full overflow-auto pb-20 scrollbar-hide">
           {/* Header */}
           <div className="bg-white w-full h-[130px] rounded-t-3xl flex flex-col px-2 pt-2 relative border-b-4 border-black">
             <div className="flex justify-between items-start mb-6">
@@ -517,6 +1041,14 @@ export default function Mealplan({ userId }) {
               />
             )}
 
+            {/* SuccessModal */}
+            {showSuccessModal && (
+              <SuccessModal
+                onClose={() => setShowSuccessModal(false)}
+                autoCloseDelay={1000}
+              />
+            )}
+
             {selectedDish && (
               <DishDetailModal
                 dish={selectedDish}
@@ -536,8 +1068,101 @@ export default function Mealplan({ userId }) {
                   )
                 }
                 storeRecommendations={storeRecommendations}
+                profile={profile}
+                mealLog={mealLog}
               />
             )}
+
+            {/* Exceed Modal */}
+            {showExceedModal && (
+              <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[1000]">
+                <div className="bg-black text-lime-400 w-[320px] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 border border-lime-400">
+                  <h2 className="text-lg font-bold text-lime-300">
+                    Macro Target Exceeded
+                  </h2>
+                  <p className="text-sm text-lime-400">{exceedMessage}</p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={async () => {
+                        setShowExceedModal(false);
+                        // Proceed with adding the meal
+                        const {
+                          data: { user },
+                        } = await supabase.auth.getUser();
+                        const logDate = new Date().toISOString().split("T")[0];
+                        await proceedWithAddMeal(
+                          selectedDish,
+                          selectedDish.planMealType || "unknown",
+                          selectedDish,
+                          selectedDish.servingSize || 100,
+                          selectedDish.meal_date,
+                          logDate,
+                          user
+                        );
+                      }}
+                      className="flex-1 bg-lime-400 hover:bg-lime-500 text-black font-semibold py-2 rounded-lg transition"
+                    >
+                      Continue
+                    </button>
+                    <button
+                      onClick={() => setShowExceedModal(false)}
+                      className="flex-1 bg-black border border-red-500 text-red-500 hover:bg-red-900 font-medium py-2 rounded-lg transition"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Combine Servings Modal */}
+            {showCombineModal &&
+              duplicateMealInfo &&
+              createPortal(
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000]">
+                  <div className="bg-white w-[340px] rounded-2xl shadow-2xl p-6 flex flex-col gap-4">
+                    <div className="text-center">
+                      <h2 className="text-lg font-bold text-gray-900 mb-2">
+                        {duplicateMealInfo.existingMeal.dish_name} is already in
+                        your {duplicateMealInfo.existingMeal.meal_type}
+                      </h2>
+                      <p className="text-sm text-gray-600">
+                        Do you want to add it as a new entry or increase the
+                        existing portion?
+                      </p>
+                    </div>
+
+                    <div className="flex gap-3 mt-4">
+                      <button
+                        onClick={handleCombineMeals}
+                        className="flex-1 bg-lime-500 hover:bg-lime-600 text-white font-semibold py-3 rounded-lg transition text-sm"
+                      >
+                        Increase Portion
+                        <span className="block text-xs opacity-75">
+                          (recommended)
+                        </span>
+                      </button>
+                      <button
+                        onClick={handleAddSeparateMeal}
+                        className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 rounded-lg transition text-sm"
+                      >
+                        Add Separate Entry
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setShowCombineModal(false);
+                        setDuplicateMealInfo(null);
+                      }}
+                      className="w-full bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-2 rounded-lg transition text-sm mt-2"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>,
+                document.body
+              )}
           </div>
         </div>
 

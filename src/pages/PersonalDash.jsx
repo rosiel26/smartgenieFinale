@@ -14,6 +14,7 @@ import {
 } from "../services/storeService";
 import useWorkoutTypes from "../hooks/useWorkoutTypes";
 import { isWorkoutSafe, calculateCaloriesBurned } from "../utils/workoutUtils";
+import { logMealAndGetSuggestion } from "../services/mealService";
 import TodaysExercise from "../components/TodaysExercise";
 import AddWorkoutModal from "../components/AddWorkoutModal";
 const PersonalDashboard = React.memo(function PersonalDashboard() {
@@ -55,14 +56,7 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
   const circumference = 2 * Math.PI * radius;
 
   const navigate = useNavigate();
-  useEffect(() => {
-    if (showSuccessModal) {
-      const timer = setTimeout(() => {
-        setShowSuccessModal(false);
-      }, 1000); // auto close after 2 seconds
-      return () => clearTimeout(timer);
-    }
-  }, [showSuccessModal]);
+
 
   useEffect(() => {
     const checkUserAndDisclaimer = async () => {
@@ -115,7 +109,7 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
           await Promise.all([
             supabase
               .from("health_profiles")
-              .select("*, weekly_plan_json")
+              .select("*")
               .eq("user_id", user.id)
               .single(),
             supabase
@@ -505,59 +499,44 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
   }, [suggestedDishes, searchTerm]);
 
   const handleAddMeal = useCallback(
-    async (dish, mealType, multiplier = 1, servingSize = 100) => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return;
-
+    async (
+      dish,
+      mealType,
+      multiplier = 1,
+      servingSize = 100,
+      editableIngredients = [],
+      computedTotals = null
+    ) => {
       const today = formatDate(new Date());
 
       const totalCalories =
+        computedTotals?.calories ??
         dish.calories ??
         dish.total_calories ??
         dish.base_total_calories ??
-        dish.ingredients_dish_id_fkey?.reduce(
-          (sum, ing) => sum + (Number(ing.calories) || 0),
-          0
-        ) ??
         0;
-
       const totalProtein =
+        computedTotals?.protein ??
         dish.protein ??
         dish.total_protein ??
         dish.base_total_protein ??
-        dish.ingredients_dish_id_fkey?.reduce(
-          (sum, ing) => sum + (Number(ing.protein) || 0),
-          0
-        ) ??
         0;
-
       const totalFats =
+        computedTotals?.fats ??
         dish.fats ??
         dish.total_fats ??
         dish.base_total_fats ??
-        dish.ingredients_dish_id_fkey?.reduce(
-          (sum, ing) => sum + (Number(ing.fats) || 0),
-          0
-        ) ??
         0;
-
       const totalCarbs =
+        computedTotals?.carbs ??
         dish.carbs ??
         dish.total_carbs ??
         dish.base_total_carbs ??
-        dish.ingredients_dish_id_fkey?.reduce(
-          (sum, ing) => sum + (Number(ing.carbs) || 0),
-          0
-        ) ??
         0;
 
-      // ✅ FIXED: servingSize is in grams, so adjust multiplier
       const portionMultiplier = servingSize / 100;
 
       const newEntry = {
-        user_id: user.id,
         dish_id: dish.id,
         dish_name: dish.name,
         meal_date: today,
@@ -569,15 +548,13 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
         carbs: Math.round(totalCarbs * portionMultiplier),
       };
 
-      // console.log("New meal entry:", newEntry);
+      const { success, suggestion, newMeal } = await logMealAndGetSuggestion(newEntry);
 
-      const { error } = await supabase.from("meal_logs").insert([newEntry]);
-      if (error) {
-        console.error("Error adding meal:", error.message);
-        setSuccessText("Failed to add meal. Please try again.");
+      if (success) {
+        setMealLog((prev) => [...prev, newMeal]);
+        setSuccessText(`${dish.name} added as ${mealType}! ${suggestion}`);
       } else {
-        setMealLog((prev) => [...prev, newEntry]);
-        setSuccessText(`${dish.name} added as ${mealType}!`);
+        setSuccessText(suggestion || "Failed to add meal. Please try again.");
       }
       setShowSuccessModal(true);
     },
@@ -727,6 +704,7 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
     setShowWorkoutModal(false);
     setSelectedWorkout(null);
   };
+
 
   // Early return after all hooks
   if (isLoading || !profile)
@@ -888,9 +866,12 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
             onClick={() => setShowSuccessModal(false)}
           >
             <div
-              className="bg-white rounded-2xl shadow-2xl p-6 w-[320px] animate-fadeIn"
+              className="bg-white rounded-2xl shadow-2xl p-6 w-[320px] animate-fadeIn relative"
               onClick={(e) => e.stopPropagation()}
             >
+              <button onClick={() => setShowSuccessModal(false)} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
               <h3 className="text-lg font-semibold mb-2 text-green-700">
                 Success
               </h3>

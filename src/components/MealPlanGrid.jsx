@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { FaExclamationTriangle } from "react-icons/fa"; // NEW import
 
 export default function MealPlanGrid({ weeklyPlan, mealTypes, onOpenDish }) {
   const today = new Date();
@@ -116,48 +117,67 @@ export default function MealPlanGrid({ weeklyPlan, mealTypes, onOpenDish }) {
                   let statusStyles = "";
                   let statusOverlay = null;
 
-                  if (meal.status === "added") {
-                    statusStyles =
-                      "bg-green-100 border-green-300 opacity-70 cursor-not-allowed";
+                  // NEW: Unsafe meal styling takes precedence for visual warning
+                  if (meal.isUnsafe) {
+                    statusStyles += " bg-red-50 border-red-400"; // Soft red background
                     statusOverlay = (
-                      <div className="absolute top-1 right-1 bg-green-500 text-white rounded-full h-4 w-4 flex items-center justify-center">
-                        <svg
-                          className="w-3 h-3"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                          xmlns="http://www.w3.org/2000/svg"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="3"
-                            d="M5 13l4 4L19 7"
-                          ></path>
-                        </svg>
-                      </div>
-                    );
-                  } else if (meal.status === "missed") {
-                    statusStyles = "bg-red-100 border-red-300 hover:bg-red-200";
-                    statusOverlay = (
-                      <div className="absolute inset-0 flex items-center justify-center bg-red-500 bg-opacity-20">
-                        <span className="text-red-700 font-bold text-xs uppercase tracking-wider">
-                          Missed
+                      <div className="absolute top-1 right-1 bg-red-500 text-white rounded-full h-4 w-4 flex items-center justify-center group cursor-help">
+                        <FaExclamationTriangle className="w-3 h-3" />
+                        <span className="absolute left-full top-1/2 ml-2 max-w-xs bg-red-700 text-white text-xs rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity z-10 break-words text-left shadow-lg">
+                          This meal is unsafe for your current health profile.
                         </span>
                       </div>
                     );
+                  }
+                  
+                  if (meal.status === "added") {
+                    statusStyles +=
+                      " bg-green-100 border-green-300 opacity-70 cursor-not-allowed";
+                    // Only show checkmark if not already showing unsafe icon
+                    if (!meal.isUnsafe) { 
+                      statusOverlay = (
+                        <div className="absolute top-1 right-1 bg-green-500 text-white rounded-full h-4 w-4 flex items-center justify-center">
+                          <svg
+                            className="w-3 h-3"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                            xmlns="http://www.w3.org/2000/svg"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="3"
+                              d="M5 13l4 4L19 7"
+                            ></path>
+                          </svg>
+                        </div>
+                      );
+                    }
+                  } else if (meal.status === "missed") {
+                    statusStyles += " bg-red-100 border-red-300 hover:bg-red-200";
+                    // Only show missed overlay if not already showing unsafe icon
+                    if (!meal.isUnsafe) {
+                      statusOverlay = (
+                        <div className="absolute inset-0 flex items-center justify-center bg-red-500 bg-opacity-20">
+                          <span className="text-red-700 font-bold text-xs uppercase tracking-wider">
+                            Missed
+                          </span>
+                        </div>
+                      );
+                    }
                   } else if (isActive) {
-                    statusStyles =
+                    statusStyles +=
                       " border-2 cursor-pointer hover:bg-yellow-50";
                   } else {
                     // Pending (future meals)
-                    statusStyles = "opacity-80 cursor-pointer hover:bg-gray-50";
+                    statusStyles += " opacity-80 cursor-pointer hover:bg-gray-50";
                   }
 
                   return (
                     <td
                       key={idx}
-                      className={`border px-2 py-1 relative transition-all duration-200 ${statusStyles}`}
+                      className={`border px-2 py-1 relative transition-all duration-200 ${statusStyles} ${meal.isUnsafe ? 'border-red-500 border-2' : ''}`} // Apply red border if unsafe
                       onClick={() => isClickable && onOpenDish(meal, day.date)}
                     >
                       {statusOverlay}

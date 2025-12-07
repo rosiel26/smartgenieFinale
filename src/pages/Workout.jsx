@@ -84,6 +84,8 @@ export default function Workout() {
   const [loading, setLoading] = useState(false);
   const [modalMessage, setModalMessage] = useState("");
   const [timeOfDay, setTimeOfDay] = useState("");
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [duplicateInfo, setDuplicateInfo] = useState(null);
 
   const navigate = useNavigate();
   const dropdownRef = useRef(null);
@@ -182,12 +184,90 @@ export default function Workout() {
     );
   }, [workoutTypes, searchQuery]);
 
+  const handleMergeWorkout = async () => {
+    if (!duplicateInfo) return;
+    const { existingWorkout, newDuration } = duplicateInfo;
+    const newTotalDuration = existingWorkout.duration + newDuration;
+
+    const { error } = await supabase
+      .from("workouts")
+      .update({ duration: newTotalDuration })
+      .eq("id", existingWorkout.id);
+
+    setLoading(false);
+    if (error) {
+      setModalMessage("Error merging workout: " + error.message);
+    } else {
+      setModalMessage("Workout merged successfully!");
+      setSelectedWorkout(null);
+      setTimeout(() => setModalMessage(""), 1000);
+    }
+    setShowDuplicateModal(false);
+    setDuplicateInfo(null);
+  };
+
+  const handleAddSeparateWorkout = async () => {
+    if (!duplicateInfo) return;
+    const { workoutId, newDuration } = duplicateInfo;
+
+    const { error } = await supabase.from("workouts").insert([
+      {
+        user_id: userId,
+        workout_type_id: workoutId,
+        duration: newDuration,
+      },
+    ]);
+
+    setLoading(false);
+    if (error) {
+      setModalMessage("Error saving workout: " + error.message);
+    } else {
+      setModalMessage("Workout logged successfully!");
+      setSelectedWorkout(null);
+      setTimeout(() => setModalMessage(""), 1000);
+    }
+    setShowDuplicateModal(false);
+    setDuplicateInfo(null);
+  };
+
   const handleAddWorkout = async (workoutId, durationMinutes) => {
     if (!workoutId || !durationMinutes) {
       setModalMessage("Please fill all fields.");
       return;
     }
     setLoading(true);
+
+    // Check for existing workout on the same day
+    const today = new Date().toISOString().split("T")[0];
+    const { data: existingWorkouts, error: checkError } = await supabase
+      .from("workouts")
+      .select("id, duration")
+      .eq("user_id", userId)
+      .eq("workout_type_id", workoutId)
+      .gte("created_at", `${today}T00:00:00.000Z`)
+      .lt("created_at", `${today}T23:59:59.999Z`);
+
+    if (checkError) {
+      setModalMessage(
+        "Error checking existing workouts: " + checkError.message
+      );
+      setLoading(false);
+      return;
+    }
+
+    if (existingWorkouts && existingWorkouts.length > 0) {
+      // Duplicate found, show modal
+      setDuplicateInfo({
+        existingWorkout: existingWorkouts[0],
+        newDuration: durationMinutes,
+        workoutId,
+      });
+      setShowDuplicateModal(true);
+      setLoading(false);
+      return;
+    }
+
+    // No duplicate, insert new
     const { error } = await supabase.from("workouts").insert([
       {
         user_id: userId,
@@ -224,7 +304,7 @@ export default function Workout() {
         </div>
 
         {/* Body */}
-        <div className="p-4 flex-1 overflow-auto space-y-4">
+        <div className="p-4 flex-1 overflow-auto space-y-4 scrollbar-hide">
           {/* Search */}
           <div className="relative" ref={dropdownRef}>
             <FaSearch className="absolute left-3 top-3 text-gray-400" />
@@ -386,8 +466,46 @@ export default function Workout() {
             onClose={() => setModalMessage("")}
           />
         )}
+
+        {/* Duplicate Workout Modal */}
+        {showDuplicateModal && duplicateInfo && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[1000]">
+            <div className="bg-black text-lime-400 w-[320px] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 border border-lime-400">
+              <h2 className="text-lg font-bold text-lime-300">
+                Duplicate Workout
+              </h2>
+              <p className="text-sm text-lime-400">
+                You already have this workout logged today. Do you want to merge
+                the durations or add as a separate entry?
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleMergeWorkout}
+                  className="flex-1 bg-lime-400 hover:bg-lime-500 text-black font-semibold py-2 rounded-lg transition"
+                >
+                  Merge Durations
+                </button>
+                <button
+                  onClick={handleAddSeparateWorkout}
+                  className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 rounded-lg transition"
+                >
+                  Add Separate
+                </button>
+              </div>
+              <button
+                onClick={() => {
+                  setShowDuplicateModal(false);
+                  setDuplicateInfo(null);
+                  setSelectedWorkout(null);
+                }}
+                className="w-full bg-black border border-red-500 text-red-500 hover:bg-red-900 font-medium py-2 rounded-lg transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
-

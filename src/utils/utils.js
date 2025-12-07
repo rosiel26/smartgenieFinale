@@ -51,10 +51,10 @@ export const computeDishTotalsWithIngredientOverrides = (dish) => {
       const customCarbs = carbsPerGram * customAmt;
       const customFats = fatsPerGram * customAmt;
 
-      deltaCalories += customCalories - defaultCalories;
-      deltaProtein += customProtein - defaultProtein;
-      deltaCarbs += customCarbs - defaultCarbs;
-      deltaFats += customFats - defaultFats;
+      deltaCalories += Math.ceil(customCalories) - Math.ceil(defaultCalories);
+      deltaProtein += Math.ceil(customProtein) - Math.ceil(defaultProtein);
+      deltaCarbs += Math.ceil(customCarbs) - Math.ceil(defaultCarbs);
+      deltaFats += Math.ceil(customFats) - Math.ceil(defaultFats);
     }
   }
 
