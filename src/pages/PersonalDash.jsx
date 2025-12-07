@@ -14,9 +14,11 @@ import {
 } from "../services/storeService";
 import useWorkoutTypes from "../hooks/useWorkoutTypes";
 import { isWorkoutSafe, calculateCaloriesBurned } from "../utils/workoutUtils";
-import { logMealAndGetSuggestion } from "../services/mealService";
+import { logMealAndGetSuggestion, combineMeals } from "../services/mealService";
+import { calculateDishNutrition, markAddedMeals } from "../utils/mealplan";
 import TodaysExercise from "../components/TodaysExercise";
 import AddWorkoutModal from "../components/AddWorkoutModal";
+import SuccessModal from "../components/SuccessModal";
 const PersonalDashboard = React.memo(function PersonalDashboard() {
   const [profile, setProfile] = useState(null);
   const [view, setView] = useState("nutrition-protocol");
@@ -49,6 +51,13 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
   const [loading, setLoading] = useState(false);
   const [todaysLoggedWorkout, setTodaysLoggedWorkout] = useState(null);
   const [refreshRecentLogsTrigger, setRefreshRecentLogsTrigger] = useState(0);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showCombineModal, setShowCombineModal] = useState(false);
+  const [duplicateMealInfo, setDuplicateMealInfo] = useState(null);
+  const [tempServingSize, setTempServingSize] = useState(100);
+  const [showWorkoutMergeModal, setShowWorkoutMergeModal] = useState(false);
+  const [workoutMergeInfo, setWorkoutMergeInfo] = useState(null);
+  const minSwipeDistance = 50;
 
   const workoutTypes = useWorkoutTypes();
 
@@ -57,6 +66,14 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
 
   const navigate = useNavigate();
 
+  // Helper function to get current meal type based on time
+  const getCurrentMealType = () => {
+    const now = new Date();
+    const hour = now.getHours();
+    if (hour >= 3 && hour < 16) return "Breakfast";
+    if (hour >= 16 && hour < 22) return "Lunch";
+    return null; // Outside meal times
+  };
 
   useEffect(() => {
     const checkUserAndDisclaimer = async () => {
@@ -133,7 +150,6 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
         // Handle profile data
         if (!profileResult.error && profileResult.data) {
           setProfile(profileResult.data);
-          setWeeklyPlan(profileResult.data.weekly_plan_json || null); // Set weeklyPlan
           setNutritionAdvice(generateNutritionAdvice(profileResult.data));
         } else {
           navigate("/profile");
@@ -145,6 +161,20 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
         if (mealResult.error) {
         } else {
           setMealLog(mealResult.data || []);
+        }
+
+        // Set weekly plan after both profile and meal logs are handled
+        if (!profileResult.error && profileResult.data) {
+          let parsedPlan = profileResult.data.weekly_plan_json;
+          if (typeof parsedPlan === "string") {
+            try {
+              parsedPlan = JSON.parse(parsedPlan);
+            } catch (e) {
+              parsedPlan = null;
+            }
+          }
+          const mealLogs = mealResult.data || [];
+          setWeeklyPlan(markAddedMeals(parsedPlan, mealLogs) || null);
         }
 
         // Handle workouts
@@ -356,10 +386,7 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
 
   // -------------------- Format Date Helper (Memoized) --------------------
   const formatDate = useCallback((date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
+    return date.toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
   }, []);
 
   // -------------------- Chart Data (Ultra-Optimized) --------------------
@@ -418,6 +445,38 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
     }
     return days;
   }, [mealLog, formatDate]);
+
+  // -------------------- Current Meal Based on Time --------------------
+  const [currentMealType, setCurrentMealType] = useState(getCurrentMealType());
+  const todaysMeals = useMemo(() => {
+    if (!weeklyPlan?.plan) return [];
+    const today = formatDate(new Date());
+    const todayPlan = weeklyPlan.plan.find((day) => day.date === today);
+    return todayPlan?.meals || [];
+  }, [weeklyPlan, formatDate]);
+  const currentMeal = useMemo(() => {
+    if (!currentMealType || !todaysMeals.length) return null;
+    return todaysMeals.find((m) => m.type === currentMealType);
+  }, [todaysMeals, currentMealType]);
+
+  const todaysLoggedMeal = useMemo(() => {
+    if (!currentMeal || !mealLog.length) return null;
+    const today = formatDate(new Date());
+    return mealLog.find(
+      (meal) =>
+        meal.meal_date === today &&
+        meal.meal_type === currentMealType &&
+        meal.dish_name.replace(" with rice", "") ===
+          currentMeal.name.replace(" with rice", "")
+    );
+  }, [currentMeal, mealLog, currentMealType, formatDate]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentMealType(getCurrentMealType());
+    }, 60000); // Update every minute
+    return () => clearInterval(interval);
+  }, []);
 
   // -------------------- Suggested Dishes (Ultra-Optimized) --------------------
   const suggestedDishes = useMemo(() => {
@@ -548,17 +607,46 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
         carbs: Math.round(totalCarbs * portionMultiplier),
       };
 
-      const { success, suggestion, newMeal } = await logMealAndGetSuggestion(newEntry);
+      const result = await logMealAndGetSuggestion(newEntry);
 
-      if (success) {
-        setMealLog((prev) => [...prev, newMeal]);
-        setSuccessText(`${dish.name} added as ${mealType}! ${suggestion}`);
+      if (result.isDuplicate) {
+        setDuplicateMealInfo({
+          existingMeal: result.existingMeal,
+          newMealData: result.newMealData,
+          meal: dish,
+          mealType: mealType,
+          adjustedTotals: {
+            calories: Math.round(totalCalories * portionMultiplier),
+            protein: Math.round(totalProtein * portionMultiplier),
+            fats: Math.round(totalFats * portionMultiplier),
+            carbs: Math.round(totalCarbs * portionMultiplier),
+          },
+          servingSize,
+          mealDate: today,
+        });
+        setShowCombineModal(true);
+      } else if (result.success) {
+        setMealLog((prev) => [...prev, result.newMeal]);
+        setRefreshRecentLogsTrigger((prev) => prev + 1);
+        setSuccessText(
+          `${dish.name} added as ${mealType}! ${result.suggestion}`
+        );
+        setShowSuccessModal(true);
       } else {
-        setSuccessText(suggestion || "Failed to add meal. Please try again.");
+        setSuccessText(
+          result.suggestion || "Failed to add meal. Please try again."
+        );
+        setShowSuccessModal(true);
       }
-      setShowSuccessModal(true);
     },
-    [formatDate, setMealLog, setSuccessText, setShowSuccessModal]
+    [
+      formatDate,
+      setMealLog,
+      setSuccessText,
+      setShowSuccessModal,
+      setDuplicateMealInfo,
+      setShowCombineModal,
+    ]
   );
 
   const todaysWorkout = useMemo(() => {
@@ -613,6 +701,139 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
     fetchTodaysLoggedWorkout();
   }, [profile, todaysWorkout, formatDate]);
 
+  const handleCombineMeals = async () => {
+    if (!duplicateMealInfo) return;
+
+    const { existingMeal, newMealData } = duplicateMealInfo;
+    const result = await combineMeals(existingMeal, newMealData);
+
+    if (result.success) {
+      setSuccessText(result.suggestion);
+      setShowSuccessModal(true);
+      // Refresh meal log
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        const { data, error } = await supabase
+          .from("meal_logs")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("meal_date", { ascending: true });
+        if (!error) setMealLog(data || []);
+      }
+      setRefreshRecentLogsTrigger((prev) => prev + 1);
+    } else {
+      setSuccessText(result.suggestion || "Failed to combine meals.");
+      setShowSuccessModal(true);
+    }
+
+    setShowCombineModal(false);
+    setDuplicateMealInfo(null);
+  };
+
+  const handleAddSeparateMeal = async () => {
+    if (!duplicateMealInfo) return;
+
+    const { newMealData } = duplicateMealInfo;
+
+    const result = await logMealAndGetSuggestion(newMealData, true);
+
+    if (result.success) {
+      setMealLog((prev) => [...prev, result.newMeal]);
+      setRefreshRecentLogsTrigger((prev) => prev + 1);
+      setSuccessText(`${duplicateMealInfo.meal.name} added as separate entry!`);
+      setShowSuccessModal(true);
+    } else {
+      setSuccessText(result.suggestion || "Failed to add meal.");
+      setShowSuccessModal(true);
+    }
+
+    setShowCombineModal(false);
+    setDuplicateMealInfo(null);
+  };
+
+  const handleMergeWorkout = async () => {
+    if (!workoutMergeInfo) return;
+
+    const { existing, newData } = workoutMergeInfo;
+    const combinedDuration = existing.duration + newData.duration;
+    const updatedData = {
+      ...newData,
+      duration: combinedDuration,
+      calories_burned: calculateCaloriesBurned(
+        workoutMergeInfo.workout.met_value,
+        profile.weight_kg,
+        combinedDuration
+      ),
+      fat_burned:
+        (calculateCaloriesBurned(
+          workoutMergeInfo.workout.met_value,
+          profile.weight_kg,
+          combinedDuration
+        ) *
+          0.3) /
+        9,
+      carbs_burned:
+        (calculateCaloriesBurned(
+          workoutMergeInfo.workout.met_value,
+          profile.weight_kg,
+          combinedDuration
+        ) *
+          0.7) /
+        4,
+    };
+
+    const { error } = await supabase
+      .from("workouts")
+      .update(updatedData)
+      .eq("id", existing.id);
+
+    if (!error) {
+      setTodaysLoggedWorkout({ ...existing, ...updatedData });
+      setRefreshRecentLogsTrigger((prev) => prev + 1);
+      const { data } = await supabase
+        .from("workouts")
+        .select("calories_burned, fat_burned, carbs_burned")
+        .eq("user_id", (await supabase.auth.getUser()).data.user.id);
+      setWorkouts(data);
+      setSuccessText("Workout duration added successfully!");
+      setShowSuccessModal(true);
+    } else {
+      setSuccessText("Error updating workout.");
+      setShowSuccessModal(true);
+    }
+
+    setShowWorkoutMergeModal(false);
+    setWorkoutMergeInfo(null);
+  };
+
+  const handleAddSeparateWorkout = async () => {
+    if (!workoutMergeInfo) return;
+
+    const { newData } = workoutMergeInfo;
+
+    const { error } = await supabase.from("workouts").insert([newData]);
+
+    if (!error) {
+      setTodaysLoggedWorkout(newData);
+      setRefreshRecentLogsTrigger((prev) => prev + 1);
+      const { data } = await supabase
+        .from("workouts")
+        .select("calories_burned, fat_burned, carbs_burned")
+        .eq("user_id", (await supabase.auth.getUser()).data.user.id);
+      setWorkouts(data);
+      setSuccessText("Separate workout logged successfully!");
+      setShowSuccessModal(true);
+    } else {
+      setSuccessText("Error saving workout.");
+      setShowSuccessModal(true);
+    }
+
+    setShowWorkoutMergeModal(false);
+    setWorkoutMergeInfo(null);
+  };
+
   const handleSaveWorkout = async (
     workoutId,
     durationMinutes,
@@ -658,53 +879,44 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
         4, // Example: 70% of calories from carbs, 4kcal/g carb
     };
 
-    let error;
-    let newWorkoutLog;
+    setLoading(false);
 
     if (workoutLogId) {
-      // Update existing workout log
-      const { data, error: updateError } = await supabase
-        .from("workouts")
-        .update(workoutData)
-        .eq("id", workoutLogId)
-        .select()
-        .maybeSingle(); // Changed from .single()
-      error = updateError;
-      newWorkoutLog = data;
-      console.log("Updated workout log:", newWorkoutLog); // Debug log
+      // Show merge modal instead of updating directly
+      const existingWorkout = todaysLoggedWorkout; // Assuming it's the existing
+      setWorkoutMergeInfo({
+        existing: existingWorkout,
+        newData: workoutData,
+        workout: selectedWorkout,
+      });
+      setShowWorkoutMergeModal(true);
     } else {
       // Insert new workout log
-      const { data, error: insertError } = await supabase
+      const { data, error } = await supabase
         .from("workouts")
         .insert([workoutData])
         .select()
-        .maybeSingle(); // Changed from .single()
-      error = insertError;
-      newWorkoutLog = data;
-      console.log("Inserted workout log:", newWorkoutLog); // Debug log
-    }
-    setLoading(false);
+        .maybeSingle();
+      if (error) {
+        setSuccessText("Error saving workout: " + error.message);
+        console.error("Error saving workout:", error);
+      } else {
+        setSuccessText("Workout logged successfully!");
+        setTodaysLoggedWorkout(data);
+        setRefreshRecentLogsTrigger((prev) => prev + 1);
 
-    if (error) {
-      setSuccessText("Error saving workout: " + error.message);
-      console.error("Error saving workout:", error); // Log the full error object
-    } else {
-      setSuccessText("Workout logged successfully!");
-      setTodaysLoggedWorkout(newWorkoutLog); // Update today's logged workout state
-      setRefreshRecentLogsTrigger((prev) => prev + 1); // Increment to trigger refresh
-
-      // Refetch all workouts to update the dashboard totals
-      const { data, error: fetchError } = await supabase
-        .from("workouts")
-        .select("calories_burned, fat_burned, carbs_burned")
-        .eq("user_id", user.id);
-      if (!fetchError) setWorkouts(data);
+        // Refetch all workouts to update the dashboard totals
+        const { data: workoutsData, error: fetchError } = await supabase
+          .from("workouts")
+          .select("calories_burned, fat_burned, carbs_burned")
+          .eq("user_id", user.id);
+        if (!fetchError) setWorkouts(workoutsData);
+      }
+      setShowSuccessModal(true);
     }
-    setShowSuccessModal(true);
     setShowWorkoutModal(false);
     setSelectedWorkout(null);
   };
-
 
   // Early return after all hooks
   if (isLoading || !profile)
@@ -785,20 +997,177 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
               />
 
               <div className="grid grid-cols-1 gap-5">
-                <TodaysExercise
-                  workout={todaysWorkout}
-                  onAdd={() => {
-                    setSelectedWorkout(todaysWorkout);
-                    setShowWorkoutModal(true);
-                  }}
-                  onEdit={(workout) => {
-                    setSelectedWorkout(workout); // This should be todaysWorkout
-                    setShowWorkoutModal(true);
-                  }}
-                  isLogged={!!todaysLoggedWorkout}
-                  loggedDuration={todaysLoggedWorkout?.duration}
-                  loggedCaloriesBurned={todaysLoggedWorkout?.calories_burned}
-                />
+                <div className="bg-white rounded-2xl border-2 border-black p-2 shadow-md">
+                  <div
+                    className={`p-4 rounded-xl shadow-md border ${
+                      todaysLoggedMeal ? "bg-white border-black" : "bg-black "
+                    }`}
+                  >
+                    <div className="flex justify-between items-center mb-3">
+                      <h3
+                        className={`text-md font-bold ${
+                          todaysLoggedMeal ? "text-black" : "text-white"
+                        }`}
+                      >
+                        Today's {currentMealType || "Breakfast"}
+                      </h3>
+                      <button
+                        onClick={() => setShowConfirmModal(true)}
+                        className="py-2 px-2 rounded-md bg-lime-500 text-black text-xs font-bold hover:bg-lime-600 hover:shadow-sm transition-all duration-150 active:scale-95"
+                      >
+                        {todaysLoggedMeal ? "Update" : "Log Meal"}
+                      </button>
+                    </div>
+                    {currentMeal ? (
+                      <div className="flex flex-col space-y-2">
+                        <div className="flex items-center text-left">
+                          <div className="flex-1">
+                            <h4
+                              className={`font-medium ${
+                                todaysLoggedMeal ? "text-black" : "text-white"
+                              }`}
+                            >
+                              {currentMeal.name}
+                            </h4>
+                            <div
+                              className={`flex space-x-2 mt-1 text-right ${
+                                todaysLoggedMeal
+                                  ? "text-gray-800"
+                                  : "text-lime-400"
+                              }`}
+                            >
+                              <span
+                                className={`${
+                                  todaysLoggedMeal
+                                    ? "text-gray-800"
+                                    : "text-lime-400"
+                                } text-xs `}
+                              >
+                                Cal:{" "}
+                                <span
+                                  className={`${
+                                    todaysLoggedMeal
+                                      ? "text-gray-800"
+                                      : "text-lime-400"
+                                  }`}
+                                >
+                                  {Math.round(
+                                    calculateDishNutrition(currentMeal)
+                                      .calories || 0
+                                  )}
+                                </span>
+                              </span>
+                              <span
+                                className={`${
+                                  todaysLoggedMeal
+                                    ? "text-gray-800"
+                                    : "text-lime-400"
+                                } text-xs `}
+                              >
+                                Prot:{" "}
+                                <span
+                                  className={`${
+                                    todaysLoggedMeal
+                                      ? "text-gray-800"
+                                      : "text-lime-400"
+                                  }`}
+                                >
+                                  {Math.round(
+                                    calculateDishNutrition(currentMeal)
+                                      .protein || 0
+                                  )}
+                                  g
+                                </span>
+                              </span>
+                              <span
+                                className={`${
+                                  todaysLoggedMeal
+                                    ? "text-gray-800"
+                                    : "text-lime-400"
+                                } text-xs `}
+                              >
+                                Fat:{" "}
+                                <span
+                                  className={`${
+                                    todaysLoggedMeal
+                                      ? "text-gray-800"
+                                      : "text-lime-400"
+                                  }`}
+                                >
+                                  {Math.round(
+                                    calculateDishNutrition(currentMeal).fat || 0
+                                  )}
+                                  g
+                                </span>
+                              </span>
+                              <span
+                                className={`${
+                                  todaysLoggedMeal
+                                    ? "text-gray-800"
+                                    : "text-lime-400"
+                                } text-xs `}
+                              >
+                                Carb:{" "}
+                                <span
+                                  className={`${
+                                    todaysLoggedMeal
+                                      ? "text-gray-800"
+                                      : "text-lime-400"
+                                  }`}
+                                >
+                                  {Math.round(
+                                    calculateDishNutrition(currentMeal).carbs ||
+                                      0
+                                  )}
+                                  g
+                                </span>
+                              </span>
+                            </div>
+                          </div>
+                          {currentMeal.image_url ? (
+                            <img
+                              src={currentMeal.image_url}
+                              alt={currentMeal.name}
+                              className="w-16 h-16 object-cover rounded-md ml-2 border-2 border-lime-500"
+                            />
+                          ) : (
+                            <div className="w-16 h-16 bg-gray-200 rounded-md flex items-center justify-center ml-2">
+                              <span className="text-gray-400 text-xs">
+                                No Image
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <p
+                        className={`text-sm ${
+                          todaysLoggedMeal ? "text-black" : "text-white"
+                        }`}
+                      >
+                        {currentMealType
+                          ? `No ${currentMealType} planned for today`
+                          : "Not time for breakfast"}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="p-4 rounded-2xl shadow-md border bg-black">
+                  <TodaysExercise
+                    workout={todaysWorkout}
+                    onAdd={() => {
+                      setSelectedWorkout(todaysWorkout);
+                      setShowWorkoutModal(true);
+                    }}
+                    onEdit={(workout) => {
+                      setSelectedWorkout(workout);
+                      setShowWorkoutModal(true);
+                    }}
+                    isLogged={!!todaysLoggedWorkout}
+                    loggedDuration={todaysLoggedWorkout?.duration}
+                    loggedCaloriesBurned={todaysLoggedWorkout?.calories_burned}
+                  />
+                </div>
               </div>
               <hr />
               <RecentMealAndWorkoutLogs
@@ -861,23 +1230,10 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
           />
         )}
         {showSuccessModal && (
-          <div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-            onClick={() => setShowSuccessModal(false)}
-          >
-            <div
-              className="bg-white rounded-2xl shadow-2xl p-6 w-[320px] animate-fadeIn relative"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button onClick={() => setShowSuccessModal(false)} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-              <h3 className="text-lg font-semibold mb-2 text-green-700">
-                Success
-              </h3>
-              <p className="text-sm text-gray-700 mb-4">{successText}</p>
-            </div>
-          </div>
+          <SuccessModal
+            message={successText}
+            onClose={() => setShowSuccessModal(false)}
+          />
         )}
 
         <AddWorkoutModal
@@ -893,6 +1249,215 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
           loading={loading}
           notRecommended={selectedWorkout?.notRecommended}
         />
+
+        {/* Confirmation Modal */}
+        {showConfirmModal && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[1000]">
+            <div className="bg-black text-white w-[320px] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 border border-lime-400">
+              <h2 className="text-lg font-bold text-white">Confirm Meal</h2>
+
+              {/* Summary */}
+              <div className="bg-white border border-lime-400 rounded-lg p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-black font-medium">Dish:</span>
+                  <span className="font-semibold text-black">
+                    {currentMeal.name}
+                  </span>
+                </div>
+
+                <div className="flex justify-between items-center">
+                  <span className="text-black font-medium">Meal Type:</span>
+                  <span className="font-semibold text-black">
+                    {currentMealType}
+                  </span>
+                </div>
+
+                <div className="flex justify-between items-center">
+                  <span className="text-black font-medium">Serving Size:</span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="10"
+                    value={tempServingSize}
+                    onChange={(e) => setTempServingSize(Number(e.target.value))}
+                    className="w-20 bg-white border border-lime-400 rounded px-2 py-1 text-black text-right"
+                  />
+                  g
+                </div>
+
+                <div className="border-t border-lime-400 pt-3">
+                  <p className="text-xs text-black mb-2 font-medium">
+                    MACROS (per serving):
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    {(() => {
+                      const multiplier = tempServingSize / 100;
+                      const nutrition = calculateDishNutrition(currentMeal);
+                      return (
+                        <>
+                          <div className="bg-white border border-lime-400 rounded p-2 text-center">
+                            <p className="text-black">Calories</p>
+                            <p className="font-bold text-black">
+                              {Math.round(
+                                (nutrition.calories || 0) * multiplier
+                              )}{" "}
+                              kcal
+                            </p>
+                          </div>
+                          <div className="bg-white border border-lime-400 rounded p-2 text-center">
+                            <p className="text-black">Protein</p>
+                            <p className="font-bold text-black">
+                              {Math.round(
+                                (nutrition.protein || 0) * multiplier
+                              )}
+                              g
+                            </p>
+                          </div>
+                          <div className="bg-white border border-lime-400 rounded p-2 text-center">
+                            <p className="text-black">Carbs</p>
+                            <p className="font-bold text-black">
+                              {Math.round((nutrition.carbs || 0) * multiplier)}g
+                            </p>
+                          </div>
+                          <div className="bg-white border border-lime-400 rounded p-2 text-center">
+                            <p className="text-black">Fats</p>
+                            <p className="font-bold text-black">
+                              {Math.round((nutrition.fat || 0) * multiplier)}g
+                            </p>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Buttons */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowConfirmModal(false)}
+                  className="flex-1 bg-black border border-red-500 text-red-500 hover:bg-red-900 font-semibold py-2 rounded-lg transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setShowConfirmModal(false);
+                    handleAddMeal(
+                      currentMeal,
+                      currentMealType,
+                      1,
+                      tempServingSize,
+                      [],
+                      calculateDishNutrition(currentMeal)
+                    );
+                  }}
+                  className="flex-1 bg-lime-400 hover:bg-lime-500 text-black font-semibold py-2 rounded-lg transition"
+                >
+                  Continue
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Combine Servings Modal */}
+        {showCombineModal && duplicateMealInfo && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[1000]">
+            <div className="bg-black text-lime-400 w-[340px] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 border border-lime-400">
+              <div className="text-center">
+                <h2 className="text-lg font-bold text-lime-300 mb-2">
+                  {duplicateMealInfo.existingMeal.dish_name} (
+                  {(
+                    duplicateMealInfo.existingMeal.serving_label || "0 g"
+                  ).replace(" g", "")}
+                  g + {duplicateMealInfo.servingSize}) is already in your{" "}
+                  {duplicateMealInfo.existingMeal.meal_type}
+                </h2>
+                <p className="text-sm text-lime-400">
+                  Do you want to add it as a new entry or increase the existing
+                  portion?
+                </p>
+              </div>
+
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={handleCombineMeals}
+                  className="flex-1 bg-lime-400 hover:bg-lime-500 text-black font-semibold py-3 rounded-lg transition text-sm"
+                >
+                  Increase Portion
+                  <span className="block text-xs opacity-75">
+                    (recommended)
+                  </span>
+                </button>
+                <button
+                  onClick={handleAddSeparateMeal}
+                  className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 rounded-lg transition text-sm"
+                >
+                  Add Separate Entry
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  setShowCombineModal(false);
+                  setDuplicateMealInfo(null);
+                }}
+                className="w-full bg-black border border-red-500 text-red-500 hover:bg-red-900 font-medium py-2 rounded-lg transition text-sm mt-2"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Workout Merge Modal */}
+        {showWorkoutMergeModal && workoutMergeInfo && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[1000]">
+            <div className="bg-black text-lime-400 w-[340px] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 border border-lime-400">
+              <div className="text-center">
+                <h2 className="text-lg font-bold text-lime-300 mb-2">
+                  {workoutMergeInfo.workout?.name} (
+                  {workoutMergeInfo.existing.duration}
+                  min + {workoutMergeInfo.newData.duration}min) is already
+                  logged today
+                </h2>
+                <p className="text-sm text-lime-400">
+                  Do you want to add the duration to the existing workout or log
+                  a separate entry?
+                </p>
+              </div>
+
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={handleMergeWorkout}
+                  className="flex-1 bg-lime-400 hover:bg-lime-500 text-black font-semibold py-3 rounded-lg transition text-sm"
+                >
+                  Add Duration
+                  <span className="block text-xs opacity-75">
+                    (recommended)
+                  </span>
+                </button>
+                <button
+                  onClick={handleAddSeparateWorkout}
+                  className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 rounded-lg transition text-sm"
+                >
+                  Log Separate Entry
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  setShowWorkoutMergeModal(false);
+                  setWorkoutMergeInfo(null);
+                }}
+                className="w-full bg-black border border-red-500 text-red-500 hover:bg-red-900 font-medium py-2 rounded-lg transition text-sm mt-2"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         <FooterNav />
       </div>

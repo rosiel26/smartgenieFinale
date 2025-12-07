@@ -295,8 +295,8 @@ export default function Workout() {
         {/* Header */}
         <div className="bg-black w-full h-[130px] rounded-t-3xl flex flex-col px-5 pt-5">
           <p className="text-lg font-semibold text-white">
-            Hi <span className="text-green-400">{profile?.full_name}</span>,
-            Good {timeOfDay}!
+            Hi <span className="text-lime-500">{profile?.full_name}</span>, Good{" "}
+            {timeOfDay}!
           </p>
           <p className="text-sm text-white mt-1">
             Ready to start your workout?

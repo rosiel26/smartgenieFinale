@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "../supabaseClient";
 import { logMealAndGetSuggestion, combineMeals } from "../services/mealService";
+import { getLocalDateString } from "../utils/utils";
 import SuccessModal from "./SuccessModal";
 import jsPDF from "jspdf";
 
@@ -132,7 +133,7 @@ const MealDetailModal = ({
 
     if (!skipExceedCheck && profile && mealLog) {
       // Check if adding this meal would exceed daily macro targets
-      const logDate = new Date().toISOString().split("T")[0];
+      const logDate = getLocalDateString(new Date());
       const currentDayMeals = mealLog.filter((m) => m.meal_date === logDate);
       const currentTotals = currentDayMeals.reduce(
         (totals, m) => ({
@@ -163,7 +164,7 @@ const MealDetailModal = ({
           "You've gone over your protein target for today. That's okay — staying aware is what matters. You might balance it with lighter protein sources for your next meal.";
       } else if (projectedTotals.fat > (profile.fats_needed || 0)) {
         exceedMsg =
-          "You've gone over your fat target for today. That's okay — staying aware is what matters. Try choosing lighter-fat foods for your next meal.";
+          "You've exceeded your fat target for the day. For your next meal, consider something lighter to balance it out.";
       }
 
       if (exceedMsg) {
@@ -208,7 +209,7 @@ const MealDetailModal = ({
         name: hasRice ? `${baseName} with rice` : baseName,
       };
 
-      const logDate = new Date().toISOString().split("T")[0];
+      const logDate = getLocalDateString(new Date());
 
       const mealLogData = {
         dish_id: modifiedDish.id,
@@ -741,25 +742,25 @@ const MealDetailModal = ({
       {/* Exceed Modal */}
       {showExceedModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[1000]">
-          <div className="bg-black text-lime-400 w-[320px] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 border border-lime-400">
-            <h2 className="text-lg font-bold text-lime-300">
+          <div className="bg-black text-lime-400 w-[250px] rounded-2xl shadow-2xl p-4 flex flex-col gap-3 border border-lime-400">
+            <h2 className="text-base font-bold text-lime-300">
               Macro Target Exceeded
             </h2>
             <p className="text-sm text-lime-400">{exceedMessage}</p>
-            <div className="flex gap-3">
+            <div className="flex gap-2">
               <button
                 onClick={() => {
                   setShowExceedModal(false);
                   setSkipExceedCheck(true);
                   setShowConfirmModal(true);
                 }}
-                className="flex-1 bg-lime-400 hover:bg-lime-500 text-black font-semibold py-2 rounded-lg transition"
+                className="flex-1 bg-lime-400 hover:bg-lime-500 text-black font-semibold py-2 rounded-lg transition text-sm"
               >
                 Continue
               </button>
               <button
                 onClick={() => setShowExceedModal(false)}
-                className="flex-1 bg-black border border-red-500 text-red-500 hover:bg-red-900 font-medium py-2 rounded-lg transition"
+                className="flex-1 bg-black border border-red-500 text-red-500 hover:bg-red-900 font-medium py-2 rounded-lg transition text-sm"
               >
                 Cancel
               </button>

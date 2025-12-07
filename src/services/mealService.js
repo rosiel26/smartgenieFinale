@@ -27,6 +27,7 @@ export async function logMealAndGetSuggestion(mealData, forceAdd = false) {
 
     const mealToLog = { ...mealData, user_id: user.id };
 
+
     // 2. Check for existing meal with same dish_name (normalized), meal_type, and meal_date
     const dishNameForCheck = mealData.dish_name.replace(" with rice", "");
     const { data: existingMeals, error: checkError } = await supabase

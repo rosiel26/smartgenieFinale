@@ -3,7 +3,7 @@ import React, { useEffect } from "react";
 const SuccessModal = ({
   message = "Successfully added!",
   onClose,
-  autoCloseDelay = 3000,
+  autoCloseDelay = 2000,
 }) => {
   useEffect(() => {
     if (autoCloseDelay > 0) {
@@ -15,12 +15,12 @@ const SuccessModal = ({
   }, [onClose, autoCloseDelay]);
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl p-6 shadow-lg max-w-sm text-center">
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+      <div className="bg-black rounded-2xl p-8 shadow-2xl w-72 text-center border-2 border-lime-500">
         <div className="flex flex-col items-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+          <div className="w-20 h-20 bg-lime-500 rounded-full flex items-center justify-center mb-6 shadow-lg">
             <svg
-              className="w-8 h-8 text-green-600"
+              className="w-10 h-10 text-black"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -28,12 +28,15 @@ const SuccessModal = ({
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeWidth={2}
+                strokeWidth={3}
                 d="M5 13l4 4L19 7"
               ></path>
             </svg>
           </div>
-          <p className="text-gray-700 text-lg font-semibold">{message}</p>
+          <h2 className="text-lime-400 text-2xl font-bold mb-4">Success</h2>
+          <p className="text-white text-lg leading-relaxed whitespace-pre-line">
+            {message}
+          </p>
         </div>
       </div>
     </div>

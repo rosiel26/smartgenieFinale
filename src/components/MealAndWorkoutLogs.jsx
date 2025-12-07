@@ -1,5 +1,12 @@
 import React, { useState } from "react";
-import { FiTrash2, FiX } from "react-icons/fi";
+import {
+  FiTrash2,
+  FiX,
+  FiZap,
+  FiTarget,
+  FiPieChart,
+  FiDroplet,
+} from "react-icons/fi";
 
 export const emojiMap = {
   Cardio: "🏃",
@@ -121,11 +128,23 @@ function MealLogGrid({
                   </div>
                 </div>
                 <div className="text-xs text-black mt-3 space-y-0.5">
-                  <div>Cal: {(entry.calories ?? 0).toFixed(0)} kcal</div>
-                  <div>Pro: {(entry.protein ?? 0).toFixed(0)} g</div>
-                  <div>Carb: {(entry.carbs ?? 0).toFixed(0)} g</div>
+                  <div className="flex items-center gap-1">
+                    <FiZap size={12} className="text-yellow-500" /> Cal:{" "}
+                    {(entry.calories ?? 0).toFixed(0)} kcal
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <FiTarget size={12} className="text-blue-500" /> Pro:{" "}
+                    {(entry.protein ?? 0).toFixed(0)} g
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <FiPieChart size={12} className="text-green-500" /> Carb:{" "}
+                    {(entry.carbs ?? 0).toFixed(0)} g
+                  </div>
                   <div className="flex items-center justify-between">
-                    <span>Fat: {(entry.fat ?? 0).toFixed(0)} g</span>
+                    <span className="flex items-center gap-1">
+                      <FiDroplet size={12} className="text-purple-500" /> Fat:{" "}
+                      {(entry.fat ?? 0).toFixed(0)} g
+                    </span>
                     {isMultiDeleteMode ? (
                       <input
                         type="checkbox"
@@ -226,30 +245,37 @@ function WorkoutLogGrid({
               >
                 <div>
                   <div className="font-medium text-xs text-lime-500 truncate">
-                    {emojiMap[w.workout_types?.name] || "🏋️"}{" "}
                     {w.workout_types?.name || "—"}
                   </div>
-                  <div className="text-xs text-black mt-1">
-                    {w.duration} min
-                  </div>
-                  <div className="text-xs text-gray-600 mt-0.5">
-                    {new Date(w.created_at).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
+                  <div className="text-xs text-gray-500">
+                    {w.duration} min -{" "}
+                    {new Date(w.created_at).toLocaleTimeString("en-US", {
+                      hour: "numeric",
+                      minute: "2-digit",
+                      hour12: true,
                     })}
                   </div>
                 </div>
 
-                <div className="text-xs text-black mt-2">
+                <div className="text-xs text-black ">
                   {w.calories_burned && (
-                    <div>Cal: {(w.calories_burned ?? 0).toFixed(0)} kcal</div>
+                    <div className="flex items-center gap-1">
+                      <FiZap size={12} className="text-yellow-500" /> Cal:{" "}
+                      {(w.calories_burned ?? 0).toFixed(0)} kcal
+                    </div>
                   )}
                   {w.fat_burned && (
-                    <div>Fat: {(w.fat_burned ?? 0).toFixed(1)} g</div>
+                    <div className="flex items-center gap-1">
+                      <FiDroplet size={12} className="text-purple-500" /> Fat:{" "}
+                      {(w.fat_burned ?? 0).toFixed(1)} g
+                    </div>
                   )}
                   {w.carbs_burned && (
                     <div className="flex items-center justify-between">
-                      <span>Carb: {(w.carbs_burned ?? 0).toFixed(1)} g</span>
+                      <span className="flex items-center gap-1">
+                        <FiPieChart size={12} className="text-green-500" />{" "}
+                        Carb: {(w.carbs_burned ?? 0).toFixed(1)} g
+                      </span>
                       {isMultiDeleteMode ? (
                         <input
                           type="checkbox"

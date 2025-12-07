@@ -4,14 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { FiCalendar } from "react-icons/fi";
 import FooterNav from "../components/FooterNav";
 import MealAndWorkoutLogs from "../components/MealAndWorkoutLogs";
-
-// Helpers
-const getLocalDateString = (date) => {
-  const d = date instanceof Date ? date : new Date(date);
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-    .toISOString()
-    .split("T")[0];
-};
+import { getLocalDateString } from "../utils/utils";
 
 const getWeekDays = (date) => {
   const start = new Date(date);

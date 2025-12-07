@@ -75,6 +75,13 @@ export const isDesktop = () => {
   );
 };
 
+export const getLocalDateString = (date) => {
+  const d = date instanceof Date ? date : new Date(date);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+    .toISOString()
+    .split("T")[0];
+};
+
 export const getCurrentMealType = () => {
   const hour = new Date().getHours();
   if (hour >= 5 && hour < 12) {
