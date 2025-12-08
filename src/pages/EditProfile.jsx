@@ -269,6 +269,11 @@ export default function EditProfile() {
     profile?.activity_level,
   ]);
 
+  const hasChanges = useMemo(
+    () => JSON.stringify(profile) !== JSON.stringify(originalProfile),
+    [profile, originalProfile]
+  );
+
   // --- Save ---
   const handleSave = async (e) => {
     e.preventDefault();
@@ -381,7 +386,8 @@ export default function EditProfile() {
             </div>
             <button
               type="submit"
-              className="flex items-center gap-1 text-white hover:opacity-80 transition"
+              disabled={!hasChanges}
+              className="flex items-center gap-1 text-white hover:opacity-80 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <FiSave /> Save
             </button>
