@@ -70,8 +70,9 @@ const PersonalDashboard = React.memo(function PersonalDashboard() {
   const getCurrentMealType = () => {
     const now = new Date();
     const hour = now.getHours();
-    if (hour >= 3 && hour < 16) return "Breakfast";
-    if (hour >= 16 && hour < 22) return "Lunch";
+    if (hour >= 5 && hour < 11) return "Breakfast";
+if (hour >= 11 && hour < 17) return "Lunch";
+if (hour >= 17 && hour < 22) return "Dinner";
     return null; // Outside meal times
   };
 
